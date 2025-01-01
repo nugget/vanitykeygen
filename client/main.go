@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -26,6 +27,24 @@ var (
 	logLevel *slog.LevelVar
 	target   string
 )
+
+type Key struct {
+	PrivateKey       []byte `json:"privateKey"`
+	PublicKey        []byte `json:"publicKey"`
+	EncodedKey       []byte `json:"encodedKey"`
+	PrivateString    string `json:"privateString"`
+	AuthorizedString string `json:"authorizedString"`
+	Fingerprint      string `json:"fingerprint"`
+}
+
+type Match struct {
+	Timestamp            time.Time `json:"timestamp"`
+	Hostname             string    `json:"hostname"`
+	SeekerID             int       `json:"seekerID"`
+	MatchedAuthorizedKey bool      `json:"matchedAuthorizedKey"`
+	MatchedFingerprint   bool      `json:"matchedFingerprint"`
+	Key                  Key       `json:"key"`
+}
 
 type seekerStatus struct {
 	timestamp            time.Time
@@ -195,7 +214,33 @@ func recordStatus(s seekerStatus, t *telemetry) error {
 
 	if s.key.fingerprint != "" {
 		logger.Warn("run select hit", "s", s)
+		fmt.Printf("%s:\n%s\n", s.key.authorizedKey, s.key.encodedKey)
 		t.hitCount++
+
+		p := Match{}
+		p.Hostname = "centro"
+		p.SeekerID = s.sid
+		p.Key.PrivateKey = s.key.privateKey
+		p.Key.PublicKey = s.key.publicKey
+		p.Key.EncodedKey = s.key.encodedKey
+		p.Key.PrivateString = fmt.Sprintf("%s", s.key.encodedKey)
+		p.Key.AuthorizedString = s.key.authorizedKey
+		p.Key.Fingerprint = s.key.fingerprint
+		p.MatchedAuthorizedKey = s.matchedAuthorizedKey
+		p.MatchedFingerprint = s.matchedFingerprint
+
+		b, err := json.Marshal(p)
+		if err != nil {
+			return fmt.Errorf("json.Marshal: %w", err)
+		}
+
+		requestBody := strings.NewReader(string(b))
+
+		_, err = http.Post("http://localhost:8192/match", "application/json", requestBody)
+		if err != nil {
+			return fmt.Errorf("http.Post: %w", err)
+		}
+
 	}
 
 	return nil

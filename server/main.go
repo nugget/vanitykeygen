@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,26 +15,56 @@ import (
 )
 
 var (
-	logger   *slog.Logger
-	logLevel *slog.LevelVar
-	target   string
+	logger      *slog.Logger
+	logLevel    *slog.LevelVar
+	target      string
+	matchLogger *slog.Logger
 )
+
+type Key struct {
+	PrivateKey       []byte `json:"privateKey"`
+	PublicKey        []byte `json:"publicKey"`
+	EncodedKey       []byte `json:"encodedKey"`
+	PrivateString    string `json:"privateString"`
+	AuthorizedString string `json:"authorizedString"`
+	Fingerprint      string `json:"fingerprint"`
+}
+
+type Match struct {
+	Timestamp            time.Time `json:"timestamp"`
+	Hostname             string    `json:"hostname"`
+	SeekerID             int       `json:"seekerID"`
+	MatchedAuthorizedKey bool      `json:"matchedAuthorizedKey"`
+	MatchedFingerprint   bool      `json:"matchedFingerprint"`
+	Key                  Key       `json:"key"`
+}
 
 func handleTarget(w http.ResponseWriter, req *http.Request) {
 	target := `(?i)[\/\+](nugget|horse|slacker|wicca|wheelsdown|hollowoak|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|equi|nugget)=?$`
 
 	fmt.Fprintf(w, target)
-	logger.Info("gave target", "target", target)
+	logger.Debug("gave target", "target", target)
 }
 
-func handleHit(w http.ResponseWriter, req *http.Request) {
-	fmt.Fprintf(w, target)
-	logger.Info("received hit")
-}
+func handleMatch(w http.ResponseWriter, req *http.Request) {
+	fmt.Fprintf(w, "OK")
+	logger.Debug("received match request", "request", req)
 
-func handlePing(w http.ResponseWriter, req *http.Request) {
-	fmt.Fprintf(w, target)
-	logger.Info("received ping")
+	decoder := json.NewDecoder(req.Body)
+	var p Match
+	err := decoder.Decode(&p)
+	if err != nil {
+		logger.Error("Decoder Failed", "error", err)
+	}
+
+	logger.Info("received match",
+		"hostname", p.Hostname,
+		"seekerID", p.SeekerID,
+		"authKey", p.Key.AuthorizedString,
+		"finger", p.Key.Fingerprint,
+	)
+
+	matchLogger.Info("match reported", "payload", p)
 }
 
 func setupLogger(ctx context.Context, stdout io.Writer) {
@@ -43,7 +74,6 @@ func setupLogger(ctx context.Context, stdout io.Writer) {
 		Level: logLevel,
 	}
 	handler := slog.NewTextHandler(stdout, handlerOptions)
-
 	logger = slog.New(handler)
 }
 
@@ -66,9 +96,15 @@ func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(st
 	handlerOptions := &slog.HandlerOptions{Level: logLevel}
 	logger = slog.New(slog.NewTextHandler(os.Stdout, handlerOptions))
 
+	matchFile, err := os.OpenFile("matchfile.log", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		return err
+	}
+	defer matchFile.Close()
+	matchLogger = slog.New(slog.NewJSONHandler(matchFile, nil))
+
 	http.HandleFunc("/target", handleTarget)
-	http.HandleFunc("/hit", handleHit)
-	http.HandleFunc("/ping", handlePing)
+	http.HandleFunc("/match", handleMatch)
 
 	go func() {
 		err = http.ListenAndServe(":8192", nil)
