@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 )
 
 var (
@@ -19,7 +20,7 @@ var (
 )
 
 func handleTarget(w http.ResponseWriter, req *http.Request) {
-	target := `[\/\+](nugget|horse|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|equi|nugget)$`
+	target := `(?i)[\/\+](nugget|horse|slacker|wicca|wheelsdown|hollowoak|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|equi|nugget)=?$`
 
 	fmt.Fprintf(w, target)
 	logger.Info("gave target", "target", target)
@@ -69,11 +70,25 @@ func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(st
 	http.HandleFunc("/hit", handleHit)
 	http.HandleFunc("/ping", handlePing)
 
-	err = http.ListenAndServe(":8192", nil)
-	if errors.Is(err, http.ErrServerClosed) {
-		logger.Warn("server closed")
-	} else if err != nil {
-		return err
+	go func() {
+		err = http.ListenAndServe(":8192", nil)
+		if errors.Is(err, http.ErrServerClosed) {
+			logger.Warn("server closed")
+		} else if err != nil {
+			logger.Error("server died", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+RunLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			stop()
+			break RunLoop
+		default:
+			time.Sleep(250 * time.Millisecond)
+		}
 	}
 
 	return nil

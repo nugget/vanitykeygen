@@ -224,10 +224,8 @@ func getTarget() (string, error) {
 		return "", err
 	}
 
-	logger.Info("target is", "target", resBody)
-
 	target := string(resBody)
-	target = `(?i)[\/\+](nugget|horse|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|equi|nugget)=?$`
+	logger.Info("target is", "target", target)
 
 	return target, nil
 }
