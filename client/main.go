@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"regexp"
@@ -27,10 +28,12 @@ var (
 )
 
 type seekerStatus struct {
-	timestamp time.Time
-	sid       int
-	keyCount  int
-	key       GenerateKeyResult
+	timestamp            time.Time
+	sid                  int
+	keyCount             int
+	matchedAuthorizedKey bool
+	matchedFingerprint   bool
+	key                  GenerateKeyResult
 }
 
 type telemetry struct {
@@ -54,6 +57,8 @@ func (s seekerStatus) LogValue() slog.Value {
 		slog.Time("timestamp", s.timestamp),
 		slog.Int("sid", s.sid),
 		slog.Int("keyCount", s.keyCount),
+		slog.Bool("matchedAuthorizedKey", s.matchedAuthorizedKey),
+		slog.Bool("matchedFingerprint", s.matchedFingerprint),
 		slog.String("fingerprint", s.key.fingerprint),
 		slog.String("auth", s.key.authorizedKey),
 	)
@@ -125,25 +130,33 @@ func seeker(ctx context.Context, statusUpdates chan seekerStatus, sid int) {
 			lastTarget = target
 		}
 
-		k, err := GenerateKey(nil)
-		if err != nil {
-			logger.Warn("error generating key", "error", err)
-			time.Sleep(1 * time.Second)
-		}
+		if target == "" {
+			logger.Info("no current target, sleeping")
+			time.Sleep(1 * time.Minute)
+		} else {
 
-		matchedFingerprint := re.MatchString(k.fingerprint)
-		matchedAuthorizedKey := re.MatchString(k.authorizedKey)
-
-		if matchedFingerprint || matchedAuthorizedKey {
-			s := seekerStatus{
-				timestamp: time.Now(),
-				sid:       sid,
-				keyCount:  keyCount,
-				key:       k,
+			k, err := GenerateKey(nil)
+			if err != nil {
+				logger.Warn("error generating key", "error", err)
+				time.Sleep(1 * time.Minute)
 			}
-			statusUpdates <- s
 
-			keyCount = 0
+			matchedFingerprint := re.MatchString(k.fingerprint)
+			matchedAuthorizedKey := re.MatchString(k.authorizedKey)
+
+			if matchedFingerprint || matchedAuthorizedKey {
+				s := seekerStatus{
+					timestamp:            time.Now(),
+					sid:                  sid,
+					keyCount:             keyCount,
+					matchedAuthorizedKey: matchedAuthorizedKey,
+					matchedFingerprint:   matchedFingerprint,
+					key:                  k,
+				}
+				statusUpdates <- s
+
+				keyCount = 0
+			}
 		}
 
 		select {
@@ -166,7 +179,7 @@ func displayStats(t *telemetry) {
 	launchDuration := time.Now().Sub(t.launchStartTime)
 	searchDuration := time.Now().Sub(t.searchStartTime)
 
-	hitRate := fmt.Sprintf("%0.04f", float64(t.hitCount)/float64(t.keyCount)*100)
+	hitRate := float64(t.hitCount) / float64(t.keyCount) * 100
 
 	logger.Info("Runtime Stats",
 		"launchDuration", launchDuration,
@@ -199,6 +212,26 @@ func setupLogger(ctx context.Context, stdout io.Writer) {
 	logger = slog.New(handler)
 }
 
+func getTarget() (string, error) {
+	r, err := http.Get("http://localhost:8192/target")
+	if err != nil {
+		return "", err
+	}
+	logger.Info("target requested", "code", r.StatusCode)
+
+	resBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		return "", err
+	}
+
+	logger.Info("target is", "target", resBody)
+
+	target := string(resBody)
+	target = `(?i)[\/\+](nugget|horse|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|equi|nugget)=?$`
+
+	return target, nil
+}
+
 // run is the real main, but one where we can exit with an error.
 func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(string) string, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -215,7 +248,10 @@ func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(st
 		return err
 	}
 
-	target = `[\/\+](nugget|horse|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|equi|nugget)$`
+	target, err = getTarget()
+	if err != nil {
+		return err
+	}
 
 	statusUpdates := make(chan seekerStatus)
 
@@ -225,16 +261,20 @@ func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(st
 
 	runtimeStats := newTelemetry()
 	statsTrigger := time.Tick(5 * time.Second)
-	newTarget := time.After(20 * time.Second)
+	checkTarget := time.Tick(20 * time.Second)
 
 RunLoop:
 	for {
 		select {
-		case <-newTarget:
-			runtimeStats.searchStartTime = time.Now()
-			runtimeStats.keyCount = 1
-			runtimeStats.hitCount = 0
-			target = "aaaa"
+		case <-checkTarget:
+			target, err = getTarget()
+			if err != nil {
+				target = ""
+				logger.Error("Unable to fetch target", "error", err)
+			}
+			// runtimeStats.searchStartTime = time.Now()
+			// runtimeStats.keyCount = 1
+			// runtimeStats.hitCount = 0
 		case <-statsTrigger:
 			displayStats(&runtimeStats)
 		case s := <-statusUpdates:
