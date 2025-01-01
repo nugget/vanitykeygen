@@ -200,7 +200,7 @@ func displayStats(t *telemetry) {
 
 	hitRate := float64(t.hitCount) / float64(t.keyCount) * 100
 
-	logger.Info("Runtime Stats",
+	logger.Debug("Runtime Stats",
 		"launchDuration", launchDuration,
 		"searchDuration", searchDuration,
 		"keyCount", t.keyCount,
@@ -214,11 +214,11 @@ func recordStatus(s seekerStatus, t *telemetry) error {
 
 	if s.key.fingerprint != "" {
 		logger.Warn("run select hit", "s", s)
-		fmt.Printf("%s:\n%s\n", s.key.authorizedKey, s.key.encodedKey)
+		// fmt.Printf("%s:\n%s\n", s.key.authorizedKey, s.key.encodedKey)
 		t.hitCount++
 
 		p := Match{}
-		p.Hostname = "centro"
+		p.Hostname, _ = os.Hostname()
 		p.SeekerID = s.sid
 		p.Key.PrivateKey = s.key.privateKey
 		p.Key.PublicKey = s.key.publicKey
@@ -236,7 +236,7 @@ func recordStatus(s seekerStatus, t *telemetry) error {
 
 		requestBody := strings.NewReader(string(b))
 
-		_, err = http.Post("http://localhost:8192/match", "application/json", requestBody)
+		_, err = http.Post("http://centro.hollowoak.net:8192/match", "application/json", requestBody)
 		if err != nil {
 			return fmt.Errorf("http.Post: %w", err)
 		}
@@ -258,11 +258,11 @@ func setupLogger(ctx context.Context, stdout io.Writer) {
 }
 
 func getTarget() (string, error) {
-	r, err := http.Get("http://localhost:8192/target")
+	r, err := http.Get("http://centro.hollowoak.net:8192/target")
 	if err != nil {
 		return "", err
 	}
-	logger.Info("target requested", "code", r.StatusCode)
+	logger.Debug("target requested", "code", r.StatusCode)
 
 	resBody, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -270,7 +270,7 @@ func getTarget() (string, error) {
 	}
 
 	target := string(resBody)
-	logger.Info("target is", "target", target)
+	logger.Debug("target is", "target", target)
 
 	return target, nil
 }

@@ -40,7 +40,7 @@ type Match struct {
 }
 
 func handleTarget(w http.ResponseWriter, req *http.Request) {
-	target := `(?i)[\/\+](nugget|horse|slacker|wicca|wheelsdown|hollowoak|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|equi|nugget)=?$`
+	target := `(?i)[\/\+](nugget|horse|slacker|wicca|wheelsdown|hollowoak|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|nugget|997gt3|997gt3rs|vanitykey|vanity-nugget)=?$`
 
 	fmt.Fprintf(w, target)
 	logger.Debug("gave target", "target", target)
