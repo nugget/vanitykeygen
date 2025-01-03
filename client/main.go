@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -41,6 +42,7 @@ type Match struct {
 	Timestamp            time.Time `json:"timestamp"`
 	Hostname             string    `json:"hostname"`
 	SeekerID             int       `json:"seekerID"`
+	MatchString          string    `json:"matchString"`
 	MatchedAuthorizedKey bool      `json:"matchedAuthorizedKey"`
 	MatchedFingerprint   bool      `json:"matchedFingerprint"`
 	Key                  Key       `json:"key"`
@@ -50,6 +52,7 @@ type seekerStatus struct {
 	timestamp            time.Time
 	sid                  int
 	keyCount             int
+	matchString          string
 	matchedAuthorizedKey bool
 	matchedFingerprint   bool
 	key                  GenerateKeyResult
@@ -164,9 +167,14 @@ func seeker(ctx context.Context, statusUpdates chan seekerStatus, sid int) {
 			matchedAuthorizedKey := re.MatchString(k.authorizedKey)
 
 			if matchedFingerprint || matchedAuthorizedKey {
+				var matchString strings.Builder
+				matchString.WriteString(re.FindString(k.fingerprint))
+				matchString.WriteString(re.FindString(k.authorizedKey))
+
 				s := seekerStatus{
 					timestamp:            time.Now(),
 					sid:                  sid,
+					matchString:          matchString.String(),
 					keyCount:             keyCount,
 					matchedAuthorizedKey: matchedAuthorizedKey,
 					matchedFingerprint:   matchedFingerprint,
@@ -226,6 +234,7 @@ func recordStatus(s seekerStatus, t *telemetry) error {
 		p.Key.PrivateString = fmt.Sprintf("%s", s.key.encodedKey)
 		p.Key.AuthorizedString = s.key.authorizedKey
 		p.Key.Fingerprint = s.key.fingerprint
+		p.MatchString = s.matchString
 		p.MatchedAuthorizedKey = s.matchedAuthorizedKey
 		p.MatchedFingerprint = s.matchedFingerprint
 
@@ -255,6 +264,11 @@ func setupLogger(ctx context.Context, stdout io.Writer) {
 	handler := slog.NewTextHandler(stdout, handlerOptions)
 
 	logger = slog.New(handler)
+
+	bi, _ := debug.ReadBuildInfo()
+	fmt.Printf("\n\n%+v\n\n", bi)
+
+	logger = logger.With("version", "v0.0.1")
 }
 
 func getTarget() (string, error) {

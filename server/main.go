@@ -34,6 +34,7 @@ type Match struct {
 	Timestamp            time.Time `json:"timestamp"`
 	Hostname             string    `json:"hostname"`
 	SeekerID             int       `json:"seekerID"`
+	MatchString          string    `json:"matchString"`
 	MatchedAuthorizedKey bool      `json:"matchedAuthorizedKey"`
 	MatchedFingerprint   bool      `json:"matchedFingerprint"`
 	Key                  Key       `json:"key"`
