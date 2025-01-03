@@ -255,6 +255,23 @@ func recordStatus(s seekerStatus, t *telemetry) error {
 	return nil
 }
 
+func myVersion() string {
+	v := "unknown"
+
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		logger.Warn("error reading build info")
+	} else {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.time" {
+				v = s.Value
+			}
+		}
+	}
+
+	return v
+}
+
 func setupLogger(ctx context.Context, stdout io.Writer) {
 	logLevel = new(slog.LevelVar)
 
@@ -265,10 +282,7 @@ func setupLogger(ctx context.Context, stdout io.Writer) {
 
 	logger = slog.New(handler)
 
-	bi, _ := debug.ReadBuildInfo()
-	fmt.Printf("\n\n%+v\n\n", bi)
-
-	logger = logger.With("version", "v0.0.1")
+	logger = logger.With("version", myVersion())
 }
 
 func getTarget() (string, error) {
