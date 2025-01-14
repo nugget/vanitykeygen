@@ -4,7 +4,9 @@ suffix   ?= $(platform)-$(arch)
 
 BUILD_DIR ?= $(PWD)/buildfiles
 
-CLIENT ?= $(BUILD_DIR)/client-$(suffix)
+CLIENT ?= $(BUILD_DIR)/vkg-client-$(suffix)
+SERVER ?= $(BUILD_DIR)/vkg-server-$(suffix)
+
 
 .PHONY: logs builddir client runclient
 
@@ -18,4 +20,10 @@ client: builddir
 	cd client && go build -o $(CLIENT)
 
 runclient: client
-	tmux new-session -A -s vanitykeygen $(CLIENT)
+	tmux new-session -A -s vkgclient $(CLIENT)
+
+server: builddir
+	cd server && go build -o $(SERVER)
+	
+runserver:
+	tmux new-session -A -s vkgserver $(SERVER)
