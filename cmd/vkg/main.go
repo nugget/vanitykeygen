@@ -28,9 +28,20 @@ func setupLogger(ctx context.Context, stdout io.Writer) {
 	logger = slog.New(handler)
 }
 
-func usage() {
-	fmt.Println("usage: vkg <server | client> [-v | --verbose]")
+func FlagSet() *flag.FlagSet {
+	f := flag.NewFlagSet("server", flag.ExitOnError)
+
+	return f
+}
+
+func usage(f *flag.FlagSet) {
+	fmt.Println("usage: <command> [<args>]")
 	fmt.Println("")
+	fmt.Println("global options")
+	f.PrintDefaults()
+	fmt.Println("server options")
+	server.FlagSet().PrintDefaults()
+
 	os.Exit(0)
 }
 
@@ -41,28 +52,26 @@ func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(st
 
 	setupLogger(ctx, stdout)
 
-	myFlags := flag.NewFlagSet("myFlags", flag.ExitOnError)
+	globalFlagSet := FlagSet()
 
-	var _ = myFlags.Bool("v", false, "Verbose logging")
-
-	err := myFlags.Parse(args[1:])
+	err := globalFlagSet.Parse(args[1:])
 	if err != nil {
 		return err
 	}
 
 	if len(args) < 2 {
-		usage()
+		usage(globalFlagSet)
 	}
 
 	logger.Debug("Launching vkg", "args", args)
 
 	switch args[1] {
 	case "server":
-		return server.Run(ctx, logger, os.Stdout, os.Stderr, os.Getenv, os.Args)
+		return server.Run(ctx, logger, os.Stdout, os.Stderr, os.Getenv, os.Args[2:])
 	case "client":
-		return client.Run(ctx, logger, os.Stdout, os.Stderr, os.Getenv, os.Args)
+		return client.Run(ctx, logger, os.Stdout, os.Stderr, os.Getenv, os.Args[2:])
 	default:
-		usage()
+		usage(globalFlagSet)
 	}
 
 	return nil

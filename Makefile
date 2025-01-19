@@ -6,7 +6,11 @@ BUILD_DIR ?= $(PWD)/build
 
 VKG_BINARY ?= $(BUILD_DIR)/vkg-$(suffix)
 
-.PHONY: logs builddir vkg
+.PHONY: debug logs builddir vkg
+
+debug:
+	@echo BUILD_DIR  = $(BUILD_DIR)
+	@echo VKG_BINARY = $(VKG_BINARY)
 
 logs:
 	tail -f matchfile.log | jq 
@@ -14,5 +18,5 @@ logs:
 builddir:
 	mkdir -p $(BUILD_DIR)
 
-vkg: builddir
-	cd cmd/vkg && go build -o $(VBKG_BINARY)
+vkg: debug builddir
+	cd cmd/vkg && go build -o $(VKG_BINARY)

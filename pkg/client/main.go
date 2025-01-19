@@ -29,6 +29,12 @@ var (
 	target   string
 )
 
+func FlagSet() *flag.FlagSet {
+	f := flag.NewFlagSet("server", flag.ExitOnError)
+
+	return f
+}
+
 type Key struct {
 	PrivateKey       []byte `json:"privateKey"`
 	PublicKey        []byte `json:"publicKey"`
@@ -297,11 +303,8 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 
 	logger = l
 
-	myFlags := flag.NewFlagSet("myFlags", flag.ExitOnError)
-
-	var _ = myFlags.Bool("v", false, "Verbose logging")
-
-	err := myFlags.Parse(args[1:])
+	myFlags := FlagSet()
+	err := myFlags.Parse(args)
 	if err != nil {
 		return err
 	}

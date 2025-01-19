@@ -19,7 +19,21 @@ var (
 	logLevel    *slog.LevelVar
 	target      string
 	matchLogger *slog.Logger
+
+	listenPort    int
+	listenAddress string
+	matchLogFile  string
 )
+
+func FlagSet() *flag.FlagSet {
+	f := flag.NewFlagSet("server", flag.ExitOnError)
+
+	f.IntVar(&listenPort, "p", 8192, "Specifies the port on which the server listens for connections")
+	f.StringVar(&listenAddress, "b", "", "Bind this address on the local machine when listening for connections (default '' for all addresses)")
+	f.StringVar(&matchLogFile, "l", "matchfile.log", "Log successful matches to this file")
+
+	return f
+}
 
 type Key struct {
 	PrivateKey       []byte `json:"privateKey"`
@@ -77,27 +91,28 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 
 	logger.Info("Starting Server")
 
-	myFlags := flag.NewFlagSet("myFlags", flag.ExitOnError)
-
-	var _ = myFlags.Bool("v", false, "Verbose logging")
-
-	err := myFlags.Parse(args[1:])
+	myFlags := FlagSet()
+	err := myFlags.Parse(args)
 	if err != nil {
 		return err
 	}
 
-	matchFile, err := os.OpenFile("matchfile.log", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	matchFile, err := os.OpenFile(matchLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return err
 	}
 	defer matchFile.Close()
 	matchLogger = slog.New(slog.NewJSONHandler(matchFile, nil))
+	logger.Info("Logging matches to file", "matchLogFile", matchLogFile)
 
 	http.HandleFunc("/target", handleTarget)
 	http.HandleFunc("/match", handleMatch)
 
 	go func() {
-		err = http.ListenAndServe(":8192", nil)
+		addr := fmt.Sprintf("%s:%d", listenAddress, listenPort)
+		logger.Info("listening", "addr", addr)
+
+		err = http.ListenAndServe(addr, nil)
 		if errors.Is(err, http.ErrServerClosed) {
 			logger.Warn("server closed")
 		} else if err != nil {
