@@ -20,3 +20,9 @@ builddir:
 
 vkg: debug builddir
 	cd cmd/vkg && go build -o $(VKG_BINARY)
+
+runserver: debug vkg
+	$(VKG_BINARY) server
+
+runclient: debug vkg
+	$(VKG_BINARY) client
