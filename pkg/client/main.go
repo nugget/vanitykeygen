@@ -27,10 +27,14 @@ var (
 	logger   *slog.Logger
 	logLevel *slog.LevelVar
 	target   string
+
+	serverURI string
 )
 
 func FlagSet() *flag.FlagSet {
 	f := flag.NewFlagSet("server", flag.ExitOnError)
+
+	f.StringVar(&serverURI, "s", "https://vkg", "vkg server URI (default 'https://vkg')")
 
 	return f
 }
@@ -251,7 +255,7 @@ func recordStatus(s seekerStatus, t *telemetry) error {
 
 		requestBody := strings.NewReader(string(b))
 
-		_, err = http.Post("http://centro.hollowoak.net:8192/match", "application/json", requestBody)
+		_, err = http.Post(serverURI, "application/json", requestBody)
 		if err != nil {
 			return fmt.Errorf("http.Post: %w", err)
 		}
@@ -279,7 +283,7 @@ func myVersion() string {
 }
 
 func getTarget() (string, error) {
-	r, err := http.Get("http://centro.hollowoak.net:8192/target")
+	r, err := http.Get(serverURI + "/target")
 	if err != nil {
 		return "", err
 	}

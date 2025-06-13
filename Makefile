@@ -21,6 +21,12 @@ builddir:
 vkg: debug builddir
 	cd cmd/vkg && go build -o $(VKG_BINARY)
 
+buildserver:
+	docker build . -t nugget/vkg-server:dev
+
+buildclient:
+	docker build . -t nugget/vkg-client:dev
+
 runserver: debug vkg
 	$(VKG_BINARY) server
 

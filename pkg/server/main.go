@@ -28,7 +28,7 @@ var (
 func FlagSet() *flag.FlagSet {
 	f := flag.NewFlagSet("server", flag.ExitOnError)
 
-	f.IntVar(&listenPort, "p", 8192, "Specifies the port on which the server listens for connections")
+	f.IntVar(&listenPort, "p", 8080, "Specifies the port on which the server listens for connections")
 	f.StringVar(&listenAddress, "b", "", "Bind this address on the local machine when listening for connections (default '' for all addresses)")
 	f.StringVar(&matchLogFile, "l", "matchfile.log", "Log successful matches to this file")
 
@@ -55,8 +55,10 @@ type Match struct {
 }
 
 func handleTarget(w http.ResponseWriter, req *http.Request) {
-	target := `(?i)[\/\+](nugget|horse|slacker|wicca|wheelsdown|hollowoak|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|nugget|997gt3|997gt3rs|vanitykey|vanity-nugget)=?$`
-
+	target = os.Getenv("VKG_TARGET")
+	if target == "" {
+		target = `(?i)[\/\+](nugget|slacker|wheelsdown|hollowoak|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|nugget-info|vanitykey|vanity-nugget)=?$`
+	}
 	fmt.Fprintf(w, target)
 	logger.Debug("gave target", "target", target)
 }

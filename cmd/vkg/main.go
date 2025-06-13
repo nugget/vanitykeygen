@@ -29,7 +29,7 @@ func setupLogger(ctx context.Context, stdout io.Writer) {
 }
 
 func FlagSet() *flag.FlagSet {
-	f := flag.NewFlagSet("server", flag.ExitOnError)
+	f := flag.NewFlagSet("client", flag.ExitOnError)
 
 	return f
 }
@@ -39,8 +39,8 @@ func usage(f *flag.FlagSet) {
 	fmt.Println("")
 	fmt.Println("global options")
 	f.PrintDefaults()
-	fmt.Println("server options")
-	server.FlagSet().PrintDefaults()
+	fmt.Println("client options")
+	client.FlagSet().PrintDefaults()
 
 	os.Exit(0)
 }
