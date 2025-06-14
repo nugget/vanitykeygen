@@ -1,4 +1,6 @@
 .DS_Store
+.idea
 *.paw
 build
 *.log
+vkg-static-build
