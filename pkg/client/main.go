@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nugget/vanitykeygen/pkg/vkg"
+
 	"github.com/mikesmitty/edkey"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/ssh"
@@ -37,25 +39,6 @@ func FlagSet() *flag.FlagSet {
 	f.StringVar(&serverURI, "s", "https://vkg", "vkg server URI (default 'https://vkg')")
 
 	return f
-}
-
-type Key struct {
-	PrivateKey       []byte `json:"privateKey"`
-	PublicKey        []byte `json:"publicKey"`
-	EncodedKey       []byte `json:"encodedKey"`
-	PrivateString    string `json:"privateString"`
-	AuthorizedString string `json:"authorizedString"`
-	Fingerprint      string `json:"fingerprint"`
-}
-
-type Match struct {
-	Timestamp            time.Time `json:"timestamp"`
-	Hostname             string    `json:"hostname"`
-	SeekerID             int       `json:"seekerID"`
-	MatchString          string    `json:"matchString"`
-	MatchedAuthorizedKey bool      `json:"matchedAuthorizedKey"`
-	MatchedFingerprint   bool      `json:"matchedFingerprint"`
-	Key                  Key       `json:"key"`
 }
 
 type seekerStatus struct {
@@ -235,7 +218,7 @@ func recordStatus(s seekerStatus, t *telemetry) error {
 		// fmt.Printf("%s:\n%s\n", s.key.authorizedKey, s.key.encodedKey)
 		t.hitCount++
 
-		p := Match{}
+		p := vkg.Match{}
 		p.Hostname, _ = os.Hostname()
 		p.SeekerID = s.sid
 		p.Key.PrivateKey = s.key.privateKey
@@ -255,7 +238,7 @@ func recordStatus(s seekerStatus, t *telemetry) error {
 
 		requestBody := strings.NewReader(string(b))
 
-		_, err = http.Post(serverURI, "application/json", requestBody)
+		_, err = http.Post(serverURI+"/match", "application/json", requestBody)
 		if err != nil {
 			return fmt.Errorf("http.Post: %w", err)
 		}
@@ -289,15 +272,17 @@ func getTarget() (string, error) {
 	}
 	logger.Debug("target requested", "code", r.StatusCode)
 
-	resBody, err := io.ReadAll(r.Body)
+	var t vkg.Target
+
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&t)
 	if err != nil {
-		return "", err
+		logger.Error("Decoder Failed", "error", err)
 	}
 
-	target := string(resBody)
-	logger.Debug("target is", "target", target)
+	logger.Debug("target is", "target", t.MatchString)
 
-	return target, nil
+	return t.MatchString, nil
 }
 
 // run is the real main, but one where we can exit with an error.
@@ -311,6 +296,11 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 	err := myFlags.Parse(args)
 	if err != nil {
 		return err
+	}
+
+	val := getenv("VKG_SERVER_URI")
+	if val != "" {
+		serverURI = val
 	}
 
 	target, err = getTarget()

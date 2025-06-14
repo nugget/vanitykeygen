@@ -86,5 +86,5 @@ runserver: debug vkg
 	$(VKG_BINARY) server
 
 runclient: debug vkg
-	$(VKG_BINARY) client -s https://vkg.hollowoak.net
+	$(VKG_BINARY) client
 
