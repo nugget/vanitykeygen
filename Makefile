@@ -2,28 +2,33 @@ platform ?= $(shell uname -s)
 arch     ?= $(shell uname -m)
 suffix   ?= $(platform)-$(arch)
 
-BUILD_DIR ?= $(PWD)/buildfiles
+BUILD_DIR ?= $(PWD)/build
 
-CLIENT ?= $(BUILD_DIR)/vkg-client-$(suffix)
-SERVER ?= $(BUILD_DIR)/vkg-server-$(suffix)
+VKG_BINARY ?= $(BUILD_DIR)/vkg-$(suffix)
 
+.PHONY: debug logs builddir vkg
 
-.PHONY: logs builddir client runclient
+debug:
+	@echo BUILD_DIR  = $(BUILD_DIR)
+	@echo VKG_BINARY = $(VKG_BINARY)
 
 logs:
-	tail -f server/matchfile.log | jq 
+	tail -f matchfile.log | jq 
 
 builddir:
 	mkdir -p $(BUILD_DIR)
 
-client: builddir
-	cd client && go build -o $(CLIENT)
+vkg: debug builddir
+	cd cmd/vkg && go build -o $(VKG_BINARY)
 
-runclient: client
-	tmux new-session -A -s vkgclient $(CLIENT)
+buildserver:
+	docker build . -t nugget/vkg-server:dev
 
-server: builddir
-	cd server && go build -o $(SERVER)
-	
-runserver:
-	tmux new-session -A -s vkgserver $(SERVER)
+buildclient:
+	docker build . -t nugget/vkg-client:dev
+
+runserver: debug vkg
+	$(VKG_BINARY) server
+
+runclient: debug vkg
+	$(VKG_BINARY) client
