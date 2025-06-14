@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nugget/vanitykeygen/pkg/vkg"
+
 	"github.com/mikesmitty/edkey"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/ssh"
@@ -37,25 +39,6 @@ func FlagSet() *flag.FlagSet {
 	f.StringVar(&serverURI, "s", "https://vkg", "vkg server URI (default 'https://vkg')")
 
 	return f
-}
-
-type Key struct {
-	PrivateKey       []byte `json:"privateKey"`
-	PublicKey        []byte `json:"publicKey"`
-	EncodedKey       []byte `json:"encodedKey"`
-	PrivateString    string `json:"privateString"`
-	AuthorizedString string `json:"authorizedString"`
-	Fingerprint      string `json:"fingerprint"`
-}
-
-type Match struct {
-	Timestamp            time.Time `json:"timestamp"`
-	Hostname             string    `json:"hostname"`
-	SeekerID             int       `json:"seekerID"`
-	MatchString          string    `json:"matchString"`
-	MatchedAuthorizedKey bool      `json:"matchedAuthorizedKey"`
-	MatchedFingerprint   bool      `json:"matchedFingerprint"`
-	Key                  Key       `json:"key"`
 }
 
 type seekerStatus struct {
@@ -235,7 +218,7 @@ func recordStatus(s seekerStatus, t *telemetry) error {
 		// fmt.Printf("%s:\n%s\n", s.key.authorizedKey, s.key.encodedKey)
 		t.hitCount++
 
-		p := Match{}
+		p := vkg.Match{}
 		p.Hostname, _ = os.Hostname()
 		p.SeekerID = s.sid
 		p.Key.PrivateKey = s.key.privateKey
