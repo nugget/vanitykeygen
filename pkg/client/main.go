@@ -238,7 +238,7 @@ func recordStatus(s seekerStatus, t *telemetry) error {
 
 		requestBody := strings.NewReader(string(b))
 
-		_, err = http.Post(serverURI, "application/json", requestBody)
+		_, err = http.Post(serverURI+"/match", "application/json", requestBody)
 		if err != nil {
 			return fmt.Errorf("http.Post: %w", err)
 		}
@@ -272,15 +272,17 @@ func getTarget() (string, error) {
 	}
 	logger.Debug("target requested", "code", r.StatusCode)
 
-	resBody, err := io.ReadAll(r.Body)
+	var t vkg.Target
+
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&t)
 	if err != nil {
-		return "", err
+		logger.Error("Decoder Failed", "error", err)
 	}
 
-	target := string(resBody)
-	logger.Debug("target is", "target", target)
+	logger.Debug("target is", "target", t.MatchString)
 
-	return target, nil
+	return t.MatchString, nil
 }
 
 // run is the real main, but one where we can exit with an error.
@@ -294,6 +296,11 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 	err := myFlags.Parse(args)
 	if err != nil {
 		return err
+	}
+
+	val := getenv("VKG_SERVER_URI")
+	if val != "" {
+		serverURI = val
 	}
 
 	target, err = getTarget()

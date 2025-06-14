@@ -4,6 +4,10 @@ import (
 	"time"
 )
 
+type Target struct {
+	MatchString string `json:"matchString"`
+}
+
 type Key struct {
 	PrivateKey       []byte `json:"privateKey"`
 	PublicKey        []byte `json:"publicKey"`

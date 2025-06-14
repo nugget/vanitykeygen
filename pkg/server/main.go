@@ -3,9 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,12 +12,14 @@ import (
 	"time"
 
 	"github.com/nugget/vanitykeygen/pkg/vkg"
+
+	"github.com/gin-gonic/gin"
 )
 
 var (
 	logger      *slog.Logger
 	logLevel    *slog.LevelVar
-	target      string
+	target      vkg.Target
 	matchLogger *slog.Logger
 
 	listenPort    int
@@ -39,34 +39,27 @@ func FlagSet() *flag.FlagSet {
 	return f
 }
 
-func handleTarget(w http.ResponseWriter, req *http.Request) {
-	target = os.Getenv("VKG_TARGET")
-	if target == "" {
-		target = `(?i)[\/\+](nugget|slacker|wheelsdown|hollowoak|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|nugget-info|vanitykey|vanity-nugget)=?$`
-	}
-	fmt.Fprintf(w, target)
-	logger.Debug("gave target", "target", target)
+func getTarget(c *gin.Context) {
+	c.JSON(http.StatusOK, target)
 }
 
-func handleMatch(w http.ResponseWriter, req *http.Request) {
-	fmt.Fprintf(w, "OK")
-	logger.Debug("received match request", "request", req)
+func postMatch(c *gin.Context) {
+	var m vkg.Match
 
-	decoder := json.NewDecoder(req.Body)
-	var p vkg.Match
-	err := decoder.Decode(&p)
+	decoder := json.NewDecoder(c.Request.Body)
+	err := decoder.Decode(&m)
 	if err != nil {
 		logger.Error("Decoder Failed", "error", err)
 	}
 
 	logger.Info("received match",
-		"hostname", p.Hostname,
-		"seekerID", p.SeekerID,
-		"authKey", p.Key.AuthorizedString,
-		"finger", p.Key.Fingerprint,
+		"hostname", m.Hostname,
+		"seekerID", m.SeekerID,
+		"authKey", m.Key.AuthorizedString,
+		"finger", m.Key.Fingerprint,
 	)
 
-	matchLogger.Info("match reported", "payload", p)
+	matchLogger.Info("match reported", "match", m)
 }
 
 // run is the real main, but one where we can exit with an error.
@@ -84,6 +77,12 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 		return err
 	}
 
+	target.MatchString = `(?i)[\/\+](nugget|slacker|wheelsdown|hollowoak|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|nugget-info|vanitykey|vanity-nugget)=?$`
+	val := getenv("VKG_TARGET")
+	if val != "" {
+		target.MatchString = val
+	}
+
 	matchFile, err := os.OpenFile(matchLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return err
@@ -92,20 +91,14 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 	matchLogger = slog.New(slog.NewJSONHandler(matchFile, nil))
 	logger.Info("Logging matches to file", "matchLogFile", matchLogFile)
 
-	http.HandleFunc("/target", handleTarget)
-	http.HandleFunc("/match", handleMatch)
-
 	go func() {
-		addr := fmt.Sprintf("%s:%d", listenAddress, listenPort)
-		logger.Info("listening", "addr", addr)
+		r := setupRouter()
 
-		err = http.ListenAndServe(addr, nil)
-		if errors.Is(err, http.ErrServerClosed) {
-			logger.Warn("server closed")
-		} else if err != nil {
-			logger.Error("server died", "error", err)
-			os.Exit(1)
-		}
+		r.GET("/target", getTarget)
+		r.POST("/match", postMatch)
+
+		// Listen and Server in 0.0.0.0:8080
+		r.Run(":8080")
 	}()
 
 RunLoop:
