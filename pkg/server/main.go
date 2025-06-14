@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/signal"
 	"time"
+
+	"github.com/nugget/vanitykeygen/pkg/vkg"
 )
 
 var (
@@ -37,25 +39,6 @@ func FlagSet() *flag.FlagSet {
 	return f
 }
 
-type Key struct {
-	PrivateKey       []byte `json:"privateKey"`
-	PublicKey        []byte `json:"publicKey"`
-	EncodedKey       []byte `json:"encodedKey"`
-	PrivateString    string `json:"privateString"`
-	AuthorizedString string `json:"authorizedString"`
-	Fingerprint      string `json:"fingerprint"`
-}
-
-type Match struct {
-	Timestamp            time.Time `json:"timestamp"`
-	Hostname             string    `json:"hostname"`
-	SeekerID             int       `json:"seekerID"`
-	MatchString          string    `json:"matchString"`
-	MatchedAuthorizedKey bool      `json:"matchedAuthorizedKey"`
-	MatchedFingerprint   bool      `json:"matchedFingerprint"`
-	Key                  Key       `json:"key"`
-}
-
 func handleTarget(w http.ResponseWriter, req *http.Request) {
 	target = os.Getenv("VKG_TARGET")
 	if target == "" {
@@ -70,7 +53,7 @@ func handleMatch(w http.ResponseWriter, req *http.Request) {
 	logger.Debug("received match request", "request", req)
 
 	decoder := json.NewDecoder(req.Body)
-	var p Match
+	var p vkg.Match
 	err := decoder.Decode(&p)
 	if err != nil {
 		logger.Error("Decoder Failed", "error", err)
