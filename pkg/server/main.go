@@ -23,6 +23,7 @@ var (
 	listenPort    int
 	listenAddress string
 	matchLogFile  string
+	//keyDirectory string
 )
 
 func FlagSet() *flag.FlagSet {
@@ -31,6 +32,7 @@ func FlagSet() *flag.FlagSet {
 	f.IntVar(&listenPort, "p", 8080, "Specifies the port on which the server listens for connections")
 	f.StringVar(&listenAddress, "b", "", "Bind this address on the local machine when listening for connections (default '' for all addresses)")
 	f.StringVar(&matchLogFile, "l", "matchfile.log", "Log successful matches to this file")
+	//f.StringVar(&keyDirectory), "keydir", "keys", "Store all matched keys in this location")
 
 	return f
 }
