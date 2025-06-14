@@ -40,8 +40,8 @@ LD_FLAGS="-X 'main.gitVersion=$(OCI_IMAGE_VERSION)'"
 .PHONY: debug logs builddir vkg vkgstatic
 
 debug:
-	@echo BUILD_DIR  = $(BUILD_DIR)
-	@echo VKG_BINARY = $(VKG_BINARY)
+	@echo "OCI Version: $(OCI_IMAGE_VERSION)"
+	@echo "LD_FLAGS: $(LD_FLAGS)"
 
 clean:
 	rm -f vkg-static-build
@@ -86,5 +86,5 @@ runserver: debug vkg
 	$(VKG_BINARY) server
 
 runclient: debug vkg
-	$(VKG_BINARY) client
+	$(VKG_BINARY) client -s https://vkg.hollowoak.net
 
