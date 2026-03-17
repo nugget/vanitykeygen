@@ -1,7 +1,7 @@
 project  := "vkg"
 registry := "ghcr.io"
 owner    := "nugget"
-image    := registry / owner / project
+image    := registry / owner / "vanitykeygen"
 
 platforms := "linux/amd64,linux/arm64"
 
