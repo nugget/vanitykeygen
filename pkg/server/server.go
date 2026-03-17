@@ -147,6 +147,8 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 	}
 	defer st.Close()
 
+	l.Info("vkg server starting", "version", Version, "db", dbPath, "listen", fmt.Sprintf("%s:%d", listenAddress, listenPort))
+
 	srv := newServer(l, st)
 
 	// Seed default target if DB is empty

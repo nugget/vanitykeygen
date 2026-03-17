@@ -15,7 +15,6 @@ import (
 	"os/signal"
 	"regexp"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +23,9 @@ import (
 	"github.com/nugget/vanitykeygen/pkg/keygen"
 	"github.com/nugget/vanitykeygen/pkg/vkg"
 )
+
+// Version is set at build time via ldflags.
+var Version = "dev"
 
 var (
 	serverURI  string
@@ -363,19 +365,6 @@ func (c *Client) reportMatch(s seekerStatus) error {
 	return nil
 }
 
-func buildVersion() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "unknown"
-	}
-	for _, s := range info.Settings {
-		if s.Key == "vcs.time" {
-			return s.Value
-		}
-	}
-	return "unknown"
-}
-
 // Run starts the client. It blocks until interrupted or a fatal error occurs.
 func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer, getenv func(string) string, args []string) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
@@ -392,11 +381,13 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 
 	hostname, _ := os.Hostname()
 
+	l.Info("vkg client starting", "version", Version, "hostname", hostname, "seekers", numSeekers, "server", serverURI)
+
 	c := &Client{
 		logger:    l,
 		serverURI: serverURI,
 		hostname:  hostname,
-		version:   buildVersion(),
+		version:   Version,
 		seekers:   numSeekers,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,

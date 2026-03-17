@@ -63,6 +63,7 @@ func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(st
 	cmdArgs := remaining[1:]
 
 	pkgserver.Version = gitVersion
+	client.Version = gitVersion
 
 	switch cmd {
 	case "server":
