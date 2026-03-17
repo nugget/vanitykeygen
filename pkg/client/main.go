@@ -219,7 +219,9 @@ func patternsMatch(compiled []compiledPattern, patterns []vkg.CompiledPattern) b
 		return false
 	}
 	for i, cp := range compiled {
-		if cp.pattern != patterns[i].Pattern {
+		if cp.pattern != patterns[i].Pattern ||
+			cp.matchFingerprint != patterns[i].MatchFingerprint ||
+			cp.matchAuthorizedKey != patterns[i].MatchAuthorizedKey {
 			return false
 		}
 	}
@@ -233,6 +235,10 @@ func (c *Client) fetchTargets() error {
 		return err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("fetch targets: server returned %s", resp.Status)
+	}
 
 	var result struct {
 		Data []vkg.CompiledPattern `json:"data"`
@@ -270,6 +276,10 @@ func (c *Client) register() error {
 		return fmt.Errorf("register: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("register: server returned %s", resp.Status)
+	}
 
 	var result struct {
 		Data vkg.RegisterResponse `json:"data"`
@@ -346,6 +356,10 @@ func (c *Client) reportMatch(s seekerStatus) error {
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("report match: server returned %s", resp.Status)
+	}
 	return nil
 }
 

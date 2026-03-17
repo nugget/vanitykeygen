@@ -14,10 +14,10 @@ against the active target and reporting hits back to the server.
 just build
 
 # Start the server (creates vkg.db on first run)
-./build/vkg-$(uname -s)-$(uname -m) server
+just run-server
 
 # In another terminal, connect a client
-./build/vkg-$(uname -s)-$(uname -m) client -s http://localhost:8080
+just run-client
 ```
 
 Open http://localhost:8080 for the web dashboard.

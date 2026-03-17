@@ -85,9 +85,39 @@ func (s *Server) attributeMatch(r *http.Request, m *vkg.Match) string {
 		scope := normalizeScope(t.MatchScope)
 
 		if t.Type == "word" {
-			// Check match string directly (case-insensitive)
-			if strings.Contains(strings.ToLower(m.MatchString), strings.ToLower(t.Pattern)) {
-				return t.ID
+			modes := t.CaseModes
+			if len(modes) == 0 {
+				modes = []string{"insensitive"}
+			}
+
+			for _, mode := range modes {
+				var word string
+				var caseInsensitive bool
+
+				switch mode {
+				case "insensitive":
+					word = t.Pattern
+					caseInsensitive = true
+				case "sensitive":
+					word = t.Pattern
+					caseInsensitive = false
+				case "capitalized":
+					word = capitalize(t.Pattern)
+					caseInsensitive = false
+				default:
+					continue
+				}
+
+				if (scope == "fingerprint" || scope == "both") && m.MatchedFingerprint {
+					if containsWord(m.Key.Fingerprint, word, caseInsensitive) {
+						return t.ID
+					}
+				}
+				if (scope == "pubkey" || scope == "both") && m.MatchedAuthorizedKey {
+					if containsWord(m.Key.AuthorizedString, word, caseInsensitive) {
+						return t.ID
+					}
+				}
 			}
 		} else {
 			re, err := regexp.Compile(t.Pattern)
@@ -107,4 +137,12 @@ func (s *Server) attributeMatch(r *http.Request, m *vkg.Match) string {
 		}
 	}
 	return ""
+}
+
+// containsWord checks if haystack contains needle, optionally case-insensitive.
+func containsWord(haystack, needle string, caseInsensitive bool) bool {
+	if caseInsensitive {
+		return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
+	}
+	return strings.Contains(haystack, needle)
 }

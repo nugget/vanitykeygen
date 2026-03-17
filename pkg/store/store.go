@@ -91,7 +91,11 @@ func (s *Store) Close() error {
 
 func (s *Store) CreateTarget(ctx context.Context, t *vkg.Target) error {
 	if t.ID == "" {
-		t.ID = vkg.NewID()
+		id, err := vkg.NewID()
+		if err != nil {
+			return err
+		}
+		t.ID = id
 	}
 	if t.Type == "" {
 		t.Type = "regex"
@@ -200,7 +204,11 @@ func (s *Store) DeleteTarget(ctx context.Context, id string) (int64, error) {
 
 func (s *Store) RecordMatch(ctx context.Context, m *vkg.Match) error {
 	if m.ID == "" {
-		m.ID = vkg.NewID()
+		id, err := vkg.NewID()
+		if err != nil {
+			return err
+		}
+		m.ID = id
 	}
 	if m.Timestamp.IsZero() {
 		m.Timestamp = time.Now().UTC()
@@ -287,7 +295,11 @@ func scanMatches(rows *sql.Rows) ([]vkg.Match, error) {
 
 func (s *Store) UpsertClient(ctx context.Context, c *vkg.ClientInfo) error {
 	if c.ID == "" {
-		c.ID = vkg.NewID()
+		id, err := vkg.NewID()
+		if err != nil {
+			return err
+		}
+		c.ID = id
 	}
 	if c.LastSeen.IsZero() {
 		c.LastSeen = time.Now().UTC()

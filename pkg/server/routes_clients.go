@@ -16,7 +16,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	clientID := req.ClientID
 	if clientID == "" {
-		clientID = vkg.NewID()
+		id, err := vkg.NewID()
+		if err != nil {
+			s.writeError(w, http.StatusInternalServerError, "failed to generate client ID")
+			return
+		}
+		clientID = id
 	}
 
 	c := &vkg.ClientInfo{

@@ -31,7 +31,7 @@ var (
 func FlagSet() *flag.FlagSet {
 	f := flag.NewFlagSet("server", flag.ExitOnError)
 	f.IntVar(&listenPort, "p", 8080, "Listen port")
-	f.StringVar(&listenAddress, "b", "", "Bind address (default '' for all)")
+	f.StringVar(&listenAddress, "b", "127.0.0.1", "Bind address")
 	f.StringVar(&dbPath, "d", "vkg.db", "SQLite database path")
 	f.StringVar(&defaultTarget, "t", "", "Default target pattern (creates if DB is empty)")
 	f.StringVar(&wordPrefix, "word-prefix", `[\/\+]`, "Regex prefix for word targets")
@@ -158,6 +158,12 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 	go srv.clientReaper(ctx)
 
 	addr := fmt.Sprintf("%s:%d", listenAddress, listenPort)
+
+	// Warn if binding to a non-loopback address since the server exposes private key material.
+	if listenAddress == "" || listenAddress == "0.0.0.0" || listenAddress == "::" {
+		l.Warn("binding to non-loopback address; server exposes private key material", "address", addr)
+	}
+
 	httpServer := &http.Server{
 		Addr:    addr,
 		Handler: srv.setupRouter(),

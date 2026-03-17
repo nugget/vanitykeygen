@@ -24,6 +24,10 @@ async function api(path, opts = {}) {
     ...opts,
   });
   if (res.status === 204) return null;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API ${res.status}: ${text}`);
+  }
   return res.json();
 }
 
@@ -266,7 +270,7 @@ async function refreshMatches() {
       <td>${formatTime(m.timestamp)}</td>
       <td class="mono">${escapeHtml(m.matchString)}</td>
       <td class="mono">${escapeHtml((m.key && m.key.fingerprint) || '-')}</td>
-      <td class="mono" title="${escapeHtml((m.key && m.key.authorizedString) || '')}">${escapeHtml(((m.key && m.key.authorizedString) || '').slice(0, 40))}...</td>
+      <td class="mono" title="${escapeHtml((m.key && m.key.authorizedString) || '')}">${escapeHtml(((m.key && m.key.authorizedString) || '').slice(0, 40))}${((m.key && m.key.authorizedString) || '').length > 40 ? '...' : ''}</td>
       <td>${escapeHtml(m.hostname || m.clientId || '-')}</td>
     </tr>
   `).join('');

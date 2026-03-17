@@ -119,8 +119,24 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.ID = id
+	// Merge omitted fields from existing target so zero values don't clobber stored data.
+	if t.Type == "" {
+		t.Type = existing.Type
+	}
 	if t.Pattern == "" {
 		t.Pattern = existing.Pattern
+	}
+	if t.Label == "" {
+		t.Label = existing.Label
+	}
+	if len(t.CaseModes) == 0 {
+		t.CaseModes = existing.CaseModes
+	}
+	if t.MatchScope == "" {
+		t.MatchScope = existing.MatchScope
+	}
+	if t.CreatedAt.IsZero() {
+		t.CreatedAt = existing.CreatedAt
 	}
 	if t.Type == "word" {
 		if err := validateWordPattern(t.Pattern); err != nil {
