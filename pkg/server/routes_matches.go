@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/nugget/vanitykeygen/pkg/vkg"
 )
@@ -84,11 +85,27 @@ func (s *Server) attributeMatch(r *http.Request, m *vkg.Match) string {
 	for _, t := range targets {
 		var pattern string
 		if t.Type == "word" {
-			word := regexp.QuoteMeta(t.Pattern)
-			if t.CaseSensitive {
-				pattern = wordPrefix + word + wordSuffix
+			word := t.Pattern
+			caseMode := t.CaseMode
+			if caseMode == "" {
+				caseMode = "insensitive"
+			}
+			if caseMode == "capitalized" {
+				// Capitalize first letter, lowercase rest
+				runes := []rune(word)
+				if len(runes) > 0 {
+					runes[0] = unicode.ToUpper(runes[0])
+					for i := 1; i < len(runes); i++ {
+						runes[i] = unicode.ToLower(runes[i])
+					}
+					word = string(runes)
+				}
+			}
+			quoted := regexp.QuoteMeta(word)
+			if caseMode == "insensitive" {
+				pattern = "(?i)" + wordPrefix + quoted + wordSuffix
 			} else {
-				pattern = "(?i)" + wordPrefix + word + wordSuffix
+				pattern = wordPrefix + quoted + wordSuffix
 			}
 		} else {
 			pattern = t.Pattern

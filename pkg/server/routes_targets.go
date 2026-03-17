@@ -94,9 +94,13 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteTarget(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := s.store.DeleteTarget(r.Context(), id); err != nil {
+	matchesDeleted, err := s.store.DeleteTarget(r.Context(), id)
+	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if matchesDeleted > 0 {
+		s.logger.Info("cascade deleted matches with target", "targetId", id, "matchesDeleted", matchesDeleted)
 	}
 	s.hub.Broadcast("target_update", map[string]string{"deleted": id})
 	w.WriteHeader(http.StatusNoContent)

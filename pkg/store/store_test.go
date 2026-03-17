@@ -71,7 +71,7 @@ func TestTargetCRUD(t *testing.T) {
 	}
 
 	// Delete
-	if err := s.DeleteTarget(ctx, tgt.ID); err != nil {
+	if _, err := s.DeleteTarget(ctx, tgt.ID); err != nil {
 		t.Fatalf("DeleteTarget: %v", err)
 	}
 	got, _ = s.GetTarget(ctx, tgt.ID)

@@ -4,18 +4,19 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/nugget/vanitykeygen/pkg/vkg"
 )
 
 // compilePatterns builds the set of regex patterns that clients should test keys against.
-// Word targets are grouped by (caseSensitive, matchScope) into combined regexes.
+// Word targets are grouped by (caseMode, matchScope) into combined regexes.
 // Regex targets are passed through individually.
 func compilePatterns(targets []vkg.Target) []vkg.CompiledPattern {
-	// Group word targets by (caseSensitive, matchScope).
+	// Group word targets by (caseMode, matchScope).
 	type wordKey struct {
-		caseSensitive bool
-		matchScope    string
+		caseMode   string
+		matchScope string
 	}
 	wordGroups := make(map[wordKey][]string)
 	wordGroupOrder := []wordKey{} // preserve insertion order
@@ -26,11 +27,16 @@ func compilePatterns(targets []vkg.Target) []vkg.CompiledPattern {
 		scope := normalizeScope(t.MatchScope)
 
 		if t.Type == "word" {
-			k := wordKey{caseSensitive: t.CaseSensitive, matchScope: scope}
+			caseMode := normalizeCaseMode(t.CaseMode)
+			k := wordKey{caseMode: caseMode, matchScope: scope}
 			if _, exists := wordGroups[k]; !exists {
 				wordGroupOrder = append(wordGroupOrder, k)
 			}
-			wordGroups[k] = append(wordGroups[k], regexp.QuoteMeta(t.Pattern))
+			word := t.Pattern
+			if caseMode == "capitalized" {
+				word = capitalize(word)
+			}
+			wordGroups[k] = append(wordGroups[k], regexp.QuoteMeta(word))
 		} else {
 			// Raw regex — pass through as-is.
 			patterns = append(patterns, vkg.CompiledPattern{
@@ -46,10 +52,11 @@ func compilePatterns(targets []vkg.Target) []vkg.CompiledPattern {
 		words := wordGroups[k]
 		alternation := strings.Join(words, "|")
 		var pattern string
-		if k.caseSensitive {
-			pattern = fmt.Sprintf("%s(%s)%s", wordPrefix, alternation, wordSuffix)
-		} else {
+		switch k.caseMode {
+		case "insensitive":
 			pattern = fmt.Sprintf("(?i)%s(%s)%s", wordPrefix, alternation, wordSuffix)
+		default: // "sensitive" and "capitalized" are both case-sensitive regex
+			pattern = fmt.Sprintf("%s(%s)%s", wordPrefix, alternation, wordSuffix)
 		}
 		patterns = append(patterns, vkg.CompiledPattern{
 			Pattern:            pattern,
@@ -68,4 +75,26 @@ func normalizeScope(scope string) string {
 	default:
 		return "both"
 	}
+}
+
+func normalizeCaseMode(mode string) string {
+	switch mode {
+	case "sensitive", "capitalized":
+		return mode
+	default:
+		return "insensitive"
+	}
+}
+
+// capitalize returns the word with the first letter uppercased and the rest lowercased.
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	for i := 1; i < len(runes); i++ {
+		runes[i] = unicode.ToLower(runes[i])
+	}
+	return string(runes)
 }

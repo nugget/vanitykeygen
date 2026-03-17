@@ -8,16 +8,17 @@ import (
 
 // Target represents a search pattern for generated keys.
 // Type is "word" (simple word match with server-generated regex) or "regex" (raw regex).
+// CaseMode controls word matching: "insensitive", "sensitive", or "capitalized".
 // MatchScope controls what is tested: "fingerprint", "pubkey", or "both".
 type Target struct {
-	ID            string    `json:"id"`
-	Type          string    `json:"type"`          // "word" or "regex"
-	Pattern       string    `json:"pattern"`       // word or raw regex
-	Label         string    `json:"label"`
-	Active        bool      `json:"active"`
-	CaseSensitive bool      `json:"caseSensitive"` // only meaningful for "word" type
-	MatchScope    string    `json:"matchScope"`    // "fingerprint", "pubkey", or "both"
-	CreatedAt     time.Time `json:"createdAt"`
+	ID         string    `json:"id"`
+	Type       string    `json:"type"`       // "word" or "regex"
+	Pattern    string    `json:"pattern"`    // word or raw regex
+	Label      string    `json:"label"`
+	Active     bool      `json:"active"`
+	CaseMode   string    `json:"caseMode"`   // "insensitive", "sensitive", or "capitalized"
+	MatchScope string    `json:"matchScope"` // "fingerprint", "pubkey", or "both"
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 // CompiledPattern is a regex pattern sent to clients for key testing.

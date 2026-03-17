@@ -74,7 +74,8 @@ async function refreshDashboard() {
   if (activeTargets.length) {
     atEl.innerHTML = activeTargets.map(t => {
       const typeLabel = t.type === 'word' ? 'word' : 'regex';
-      const csLabel = t.type === 'word' ? (t.caseSensitive ? ' (CS)' : ' (CI)') : '';
+      const modeMap = { insensitive: 'CI', sensitive: 'CS', capitalized: 'Cap' };
+      const csLabel = t.type === 'word' ? ` (${modeMap[t.caseMode] || 'CI'})` : '';
       return `<div class="active-target-item"><span class="badge badge-${typeLabel}">${typeLabel}${csLabel}</span> <strong>${escapeHtml(t.label || t.pattern)}</strong> <code>${escapeHtml(t.pattern)}</code></div>`;
     }).join('');
   } else {
@@ -133,7 +134,8 @@ async function refreshTargets() {
   empty.style.display = 'none';
   tbody.innerHTML = targets.map(t => {
     const typeLabel = t.type === 'word' ? 'word' : 'regex';
-    const csInfo = t.type === 'word' ? (t.caseSensitive ? ' (CS)' : '') : '';
+    const csInfo = t.type === 'word' && t.caseMode && t.caseMode !== 'insensitive'
+      ? ` (${t.caseMode === 'capitalized' ? 'Cap' : 'CS'})` : '';
     return `
     <tr>
       <td>${t.active
@@ -156,13 +158,13 @@ async function refreshTargets() {
 const targetTypeEl = document.getElementById('target-type');
 const targetPatternLabel = document.getElementById('target-pattern-label');
 const targetPatternEl = document.getElementById('target-pattern');
-const targetCaseSensitiveRow = document.getElementById('target-case-sensitive-row');
+const targetCaseModeRow = document.getElementById('target-case-mode-row');
 
 function updateTargetFormForType() {
   const isWord = targetTypeEl.value === 'word';
   targetPatternLabel.textContent = isWord ? 'Word' : 'Pattern (regex)';
   targetPatternEl.placeholder = isWord ? 'nugget' : '(?i)pattern$';
-  targetCaseSensitiveRow.style.display = isWord ? '' : 'none';
+  targetCaseModeRow.style.display = isWord ? '' : 'none';
 }
 
 targetTypeEl.addEventListener('change', updateTargetFormForType);
@@ -174,7 +176,7 @@ document.getElementById('btn-new-target').addEventListener('click', () => {
   targetPatternEl.value = '';
   document.getElementById('target-label').value = '';
   document.getElementById('target-match-scope').value = 'both';
-  document.getElementById('target-case-sensitive').checked = false;
+  document.getElementById('target-case-mode').value = 'insensitive';
   document.getElementById('target-active').checked = true;
   updateTargetFormForType();
   document.getElementById('target-dialog').showModal();
@@ -192,7 +194,7 @@ document.getElementById('target-form').addEventListener('submit', async (e) => {
     pattern: targetPatternEl.value,
     label: document.getElementById('target-label').value,
     matchScope: document.getElementById('target-match-scope').value,
-    caseSensitive: document.getElementById('target-case-sensitive').checked,
+    caseMode: document.getElementById('target-case-mode').value,
     active: document.getElementById('target-active').checked,
   };
 
@@ -215,7 +217,7 @@ window.editTarget = async function(id) {
   targetPatternEl.value = t.pattern;
   document.getElementById('target-label').value = t.label;
   document.getElementById('target-match-scope').value = t.matchScope || 'both';
-  document.getElementById('target-case-sensitive').checked = t.caseSensitive || false;
+  document.getElementById('target-case-mode').value = t.caseMode || 'insensitive';
   document.getElementById('target-active').checked = t.active;
   updateTargetFormForType();
   document.getElementById('target-dialog').showModal();
