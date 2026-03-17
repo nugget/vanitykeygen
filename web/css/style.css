@@ -236,10 +236,23 @@ dialog input:focus { outline: none; border-color: var(--accent); }
 }
 
 footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   padding: 0.75rem 2rem;
   border-top: 1px solid var(--border);
-  text-align: right;
   font-size: 0.75rem;
+}
+
+.footer-left a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.footer-left a:hover { text-decoration: underline; }
+
+#app-version {
+  color: var(--text-dim);
+  margin-left: 0.5rem;
 }
 
 .sse-connected { color: var(--green); }

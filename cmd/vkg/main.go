@@ -10,7 +10,7 @@ import (
 	"os/signal"
 
 	"github.com/nugget/vanitykeygen/pkg/client"
-	"github.com/nugget/vanitykeygen/pkg/server"
+	pkgserver "github.com/nugget/vanitykeygen/pkg/server"
 )
 
 var logger *slog.Logger
@@ -33,7 +33,7 @@ func usage() {
 	fmt.Println("  version   Show version info")
 	fmt.Println()
 	fmt.Println("server options:")
-	server.FlagSet().PrintDefaults()
+	pkgserver.FlagSet().PrintDefaults()
 	fmt.Println()
 	fmt.Println("client options:")
 	client.FlagSet().PrintDefaults()
@@ -62,9 +62,11 @@ func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(st
 	cmd := remaining[0]
 	cmdArgs := remaining[1:]
 
+	pkgserver.Version = gitVersion
+
 	switch cmd {
 	case "server":
-		return server.Run(ctx, logger, stdout, stderr, getenv, cmdArgs)
+		return pkgserver.Run(ctx, logger, stdout, stderr, getenv, cmdArgs)
 	case "client":
 		return client.Run(ctx, logger, stdout, stderr, getenv, cmdArgs)
 	case "version":

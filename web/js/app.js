@@ -309,8 +309,17 @@ function connectSSE() {
   });
 }
 
+// --- Version ---
+async function fetchVersion() {
+  const res = await api('/api/version');
+  if (res && res.data && res.data.version) {
+    document.getElementById('app-version').textContent = res.data.version;
+  }
+}
+
 // --- Init ---
 refreshDashboard();
+fetchVersion();
 connectSSE();
 
 // Periodic refresh for time-based displays

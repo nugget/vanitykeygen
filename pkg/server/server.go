@@ -33,6 +33,9 @@ func FlagSet() *flag.FlagSet {
 	return f
 }
 
+// Version is set at build time via ldflags.
+var Version = "dev"
+
 // Server is the VKG server.
 type Server struct {
 	logger *slog.Logger
@@ -70,6 +73,7 @@ func (s *Server) setupRouter() http.Handler {
 	mux.HandleFunc("GET /api/events", s.handleSSE)
 
 	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("GET /api/version", s.handleVersion)
 
 	// Static web UI
 	mux.Handle("GET /", http.FileServerFS(web.FS))
