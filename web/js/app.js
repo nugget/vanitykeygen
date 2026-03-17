@@ -54,9 +54,9 @@ function escapeHtml(s) {
 
 // --- Dashboard ---
 async function refreshDashboard() {
-  const [statsRes, targetRes, matchesRes] = await Promise.all([
+  const [statsRes, targetsRes, matchesRes] = await Promise.all([
     api('/api/stats'),
-    api('/api/targets/active'),
+    api('/api/targets'),
     api('/api/matches?limit=10'),
   ]);
 
@@ -68,12 +68,17 @@ async function refreshDashboard() {
     document.getElementById('stat-matches').textContent = s.totalMatches;
   }
 
-  const atEl = document.getElementById('active-target');
-  if (targetRes && targetRes.data) {
-    const t = targetRes.data;
-    atEl.innerHTML = `<strong>${escapeHtml(t.label || 'Unnamed')}</strong><br><code>${escapeHtml(t.pattern)}</code>`;
+  const atEl = document.getElementById('active-targets');
+  const allTargets = targetsRes && targetsRes.data ? targetsRes.data : [];
+  const activeTargets = allTargets.filter(t => t.active);
+  if (activeTargets.length) {
+    atEl.innerHTML = activeTargets.map(t => {
+      const typeLabel = t.type === 'word' ? 'word' : 'regex';
+      const csLabel = t.type === 'word' ? (t.caseSensitive ? ' (CS)' : ' (CI)') : '';
+      return `<div class="active-target-item"><span class="badge badge-${typeLabel}">${typeLabel}${csLabel}</span> <strong>${escapeHtml(t.label || t.pattern)}</strong> <code>${escapeHtml(t.pattern)}</code></div>`;
+    }).join('');
   } else {
-    atEl.textContent = 'No active target';
+    atEl.textContent = 'No active targets';
   }
 
   renderRecentMatches(matchesRes && matchesRes.data ? matchesRes.data : []);
@@ -89,7 +94,7 @@ function renderRecentMatches(matches) {
   }
   empty.style.display = 'none';
   tbody.innerHTML = matches.map(m => `
-    <tr>
+    <tr class="clickable" onclick="viewMatch('${m.id}')">
       <td>${formatTime(m.timestamp)}</td>
       <td class="mono">${escapeHtml(m.matchString)}</td>
       <td>${matchTypeBadges(m)}</td>
@@ -105,6 +110,14 @@ function matchTypeBadges(m) {
   return s || '-';
 }
 
+function scopeLabel(scope) {
+  switch (scope) {
+    case 'fingerprint': return 'FP';
+    case 'pubkey': return 'Auth';
+    default: return 'Both';
+  }
+}
+
 // --- Targets ---
 async function refreshTargets() {
   const res = await api('/api/targets');
@@ -118,29 +131,52 @@ async function refreshTargets() {
     return;
   }
   empty.style.display = 'none';
-  tbody.innerHTML = targets.map(t => `
+  tbody.innerHTML = targets.map(t => {
+    const typeLabel = t.type === 'word' ? 'word' : 'regex';
+    const csInfo = t.type === 'word' ? (t.caseSensitive ? ' (CS)' : '') : '';
+    return `
     <tr>
       <td>${t.active
         ? '<span class="badge badge-active">Active</span>'
         : '<span class="badge badge-inactive">Inactive</span>'}</td>
+      <td><span class="badge badge-${typeLabel}">${typeLabel}${csInfo}</span></td>
       <td>${escapeHtml(t.label || '-')}</td>
       <td class="mono">${escapeHtml(t.pattern)}</td>
-      <td>${t.priority}</td>
+      <td>${scopeLabel(t.matchScope)}</td>
       <td>
         <button class="btn btn-sm" onclick="editTarget('${t.id}')">Edit</button>
         <button class="btn btn-sm btn-danger" onclick="deleteTarget('${t.id}')">Delete</button>
       </td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 }
+
+// --- Target dialog ---
+const targetTypeEl = document.getElementById('target-type');
+const targetPatternLabel = document.getElementById('target-pattern-label');
+const targetPatternEl = document.getElementById('target-pattern');
+const targetCaseSensitiveRow = document.getElementById('target-case-sensitive-row');
+
+function updateTargetFormForType() {
+  const isWord = targetTypeEl.value === 'word';
+  targetPatternLabel.textContent = isWord ? 'Word' : 'Pattern (regex)';
+  targetPatternEl.placeholder = isWord ? 'nugget' : '(?i)pattern$';
+  targetCaseSensitiveRow.style.display = isWord ? '' : 'none';
+}
+
+targetTypeEl.addEventListener('change', updateTargetFormForType);
 
 document.getElementById('btn-new-target').addEventListener('click', () => {
   document.getElementById('target-dialog-title').textContent = 'New Target';
   document.getElementById('target-id').value = '';
-  document.getElementById('target-pattern').value = '';
+  targetTypeEl.value = 'word';
+  targetPatternEl.value = '';
   document.getElementById('target-label').value = '';
-  document.getElementById('target-priority').value = '0';
-  document.getElementById('target-active').checked = false;
+  document.getElementById('target-match-scope').value = 'both';
+  document.getElementById('target-case-sensitive').checked = false;
+  document.getElementById('target-active').checked = true;
+  updateTargetFormForType();
   document.getElementById('target-dialog').showModal();
 });
 
@@ -152,9 +188,11 @@ document.getElementById('target-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('target-id').value;
   const body = {
-    pattern: document.getElementById('target-pattern').value,
+    type: targetTypeEl.value,
+    pattern: targetPatternEl.value,
     label: document.getElementById('target-label').value,
-    priority: parseInt(document.getElementById('target-priority').value) || 0,
+    matchScope: document.getElementById('target-match-scope').value,
+    caseSensitive: document.getElementById('target-case-sensitive').checked,
     active: document.getElementById('target-active').checked,
   };
 
@@ -173,10 +211,13 @@ window.editTarget = async function(id) {
   const t = res.data;
   document.getElementById('target-dialog-title').textContent = 'Edit Target';
   document.getElementById('target-id').value = t.id;
-  document.getElementById('target-pattern').value = t.pattern;
+  targetTypeEl.value = t.type || 'regex';
+  targetPatternEl.value = t.pattern;
   document.getElementById('target-label').value = t.label;
-  document.getElementById('target-priority').value = t.priority;
+  document.getElementById('target-match-scope').value = t.matchScope || 'both';
+  document.getElementById('target-case-sensitive').checked = t.caseSensitive || false;
   document.getElementById('target-active').checked = t.active;
+  updateTargetFormForType();
   document.getElementById('target-dialog').showModal();
 };
 
@@ -200,16 +241,38 @@ async function refreshMatches() {
   }
   empty.style.display = 'none';
   tbody.innerHTML = matches.map(m => `
-    <tr>
+    <tr class="clickable" onclick="viewMatch('${m.id}')">
       <td>${formatTime(m.timestamp)}</td>
       <td class="mono">${escapeHtml(m.matchString)}</td>
       <td class="mono">${escapeHtml((m.key && m.key.fingerprint) || '-')}</td>
       <td class="mono" title="${escapeHtml((m.key && m.key.authorizedString) || '')}">${escapeHtml(((m.key && m.key.authorizedString) || '').slice(0, 40))}...</td>
       <td>${escapeHtml(m.hostname || m.clientId || '-')}</td>
-      <td><button class="btn btn-sm" onclick="viewMatch('${m.id}')">View</button></td>
     </tr>
   `).join('');
 }
+
+function copyableBlock(label, value) {
+  const id = 'copy-' + Math.random().toString(36).slice(2, 8);
+  return `
+    <div class="detail-row"><span class="detail-label">${label}</span></div>
+    <div class="copyable-section">
+      <button class="btn-copy" id="${id}" onclick="copyToClipboard('${id}', this)">Copy</button>
+      <pre id="${id}-val">${escapeHtml(value || '-')}</pre>
+    </div>
+  `;
+}
+
+window.copyToClipboard = function(id, btn) {
+  const text = document.getElementById(id + '-val').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+};
 
 window.viewMatch = async function(id) {
   const res = await api(`/api/matches/${id}`);
@@ -223,10 +286,8 @@ window.viewMatch = async function(id) {
     <div class="detail-row"><span class="detail-label">Type</span><span>${matchTypeBadges(m)}</span></div>
     <div class="detail-row"><span class="detail-label">Client</span><span>${escapeHtml(m.hostname || '-')} (${escapeHtml(m.clientId || '-')})</span></div>
     <div class="detail-row"><span class="detail-label">Fingerprint</span><span class="mono">${escapeHtml((m.key && m.key.fingerprint) || '-')}</span></div>
-    <div class="detail-row"><span class="detail-label">Auth Key</span></div>
-    <pre>${escapeHtml((m.key && m.key.authorizedString) || '-')}</pre>
-    <div class="detail-row"><span class="detail-label">Private Key</span></div>
-    <pre>${escapeHtml((m.key && m.key.privateString) || '-')}</pre>
+    ${copyableBlock('Auth Key', (m.key && m.key.authorizedString) || '')}
+    ${copyableBlock('Private Key', (m.key && m.key.privateString) || '')}
   `;
   document.getElementById('match-detail-dialog').showModal();
 };

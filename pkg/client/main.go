@@ -47,7 +47,7 @@ type Client struct {
 	version    string
 	seekers    int
 
-	target        atomic.Value // stores *vkg.Target (or nil)
+	patterns      atomic.Value // stores []vkg.CompiledPattern
 	keyCount      atomic.Int64
 	lastHeartbeat time.Time
 	lastKeyCount  int64
@@ -81,22 +81,26 @@ type telemetry struct {
 	hitCount        int
 }
 
-func (c *Client) currentTarget() *vkg.Target {
-	v := c.target.Load()
+type compiledPattern struct {
+	pattern            string
+	re                 *regexp.Regexp
+	matchFingerprint   bool
+	matchAuthorizedKey bool
+}
+
+func (c *Client) currentPatterns() []vkg.CompiledPattern {
+	v := c.patterns.Load()
 	if v == nil {
 		return nil
 	}
-	return v.(*vkg.Target)
+	return v.([]vkg.CompiledPattern)
 }
 
 func (c *Client) seeker(ctx context.Context, statusUpdates chan<- seekerStatus, sid int) {
 	logger := c.logger.With("sid", sid)
 	logger.Info("seeker starting")
 
-	var (
-		lastPattern string
-		re          *regexp.Regexp
-	)
+	var compiled []compiledPattern
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -111,27 +115,36 @@ func (c *Client) seeker(ctx context.Context, statusUpdates chan<- seekerStatus, 
 		default:
 		}
 
-		t := c.currentTarget()
-		if t == nil || t.Pattern == "" {
+		patterns := c.currentPatterns()
+		if len(patterns) == 0 {
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		if t.Pattern != lastPattern {
-			var err error
-			re, err = regexp.Compile(t.Pattern)
-			if err != nil {
-				logger.Error("unable to compile regexp", "pattern", t.Pattern, "error", err)
-				re = nil
-				lastPattern = t.Pattern
-				time.Sleep(5 * time.Second)
-				continue
+		// Recompile regexps when patterns change
+		if !patternsMatch(compiled, patterns) {
+			compiled = compiled[:0]
+			for _, p := range patterns {
+				re, err := regexp.Compile(p.Pattern)
+				if err != nil {
+					logger.Error("unable to compile regexp", "pattern", p.Pattern, "error", err)
+					continue
+				}
+				compiled = append(compiled, compiledPattern{
+					pattern:            p.Pattern,
+					re:                 re,
+					matchFingerprint:   p.MatchFingerprint,
+					matchAuthorizedKey: p.MatchAuthorizedKey,
+				})
 			}
-			logger.Info("new target pattern", "pattern", t.Pattern)
-			lastPattern = t.Pattern
+			patternStrs := make([]string, len(compiled))
+			for i, cp := range compiled {
+				patternStrs[i] = cp.pattern
+			}
+			logger.Info("patterns updated", "count", len(compiled), "patterns", patternStrs)
 		}
 
-		if re == nil {
+		if len(compiled) == 0 {
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -145,29 +158,41 @@ func (c *Client) seeker(ctx context.Context, statusUpdates chan<- seekerStatus, 
 
 		c.keyCount.Add(1)
 
-		matchedFingerprint := re.MatchString(k.Fingerprint)
-		matchedAuthorizedKey := re.MatchString(k.AuthorizedKey)
-
-		if matchedFingerprint || matchedAuthorizedKey {
-			var matchString strings.Builder
-			matchString.WriteString(re.FindString(k.Fingerprint))
-			matchString.WriteString(re.FindString(k.AuthorizedKey))
-
-			s := seekerStatus{
-				timestamp:            time.Now(),
-				sid:                  sid,
-				matchString:          matchString.String(),
-				keyCount:             keyCount,
-				matchedAuthorizedKey: matchedAuthorizedKey,
-				matchedFingerprint:   matchedFingerprint,
-				key:                  k,
+		// Test key against all compiled patterns
+		for _, cp := range compiled {
+			var matchedFingerprint, matchedAuthorizedKey bool
+			if cp.matchFingerprint {
+				matchedFingerprint = cp.re.MatchString(k.Fingerprint)
 			}
-			select {
-			case statusUpdates <- s:
-			case <-ctx.Done():
-				return
+			if cp.matchAuthorizedKey {
+				matchedAuthorizedKey = cp.re.MatchString(k.AuthorizedKey)
 			}
-			keyCount = 0
+
+			if matchedFingerprint || matchedAuthorizedKey {
+				var matchString strings.Builder
+				if matchedFingerprint {
+					matchString.WriteString(cp.re.FindString(k.Fingerprint))
+				}
+				if matchedAuthorizedKey {
+					matchString.WriteString(cp.re.FindString(k.AuthorizedKey))
+				}
+
+				s := seekerStatus{
+					timestamp:            time.Now(),
+					sid:                  sid,
+					matchString:          matchString.String(),
+					keyCount:             keyCount,
+					matchedAuthorizedKey: matchedAuthorizedKey,
+					matchedFingerprint:   matchedFingerprint,
+					key:                  k,
+				}
+				select {
+				case statusUpdates <- s:
+				case <-ctx.Done():
+					return
+				}
+				keyCount = 0
+			}
 		}
 
 		select {
@@ -189,8 +214,20 @@ func (c *Client) seeker(ctx context.Context, statusUpdates chan<- seekerStatus, 
 	}
 }
 
-// fetchTargetFull fetches and stores the active target from the server.
-func (c *Client) fetchTargetFull() error {
+func patternsMatch(compiled []compiledPattern, patterns []vkg.CompiledPattern) bool {
+	if len(compiled) != len(patterns) {
+		return false
+	}
+	for i, cp := range compiled {
+		if cp.pattern != patterns[i].Pattern {
+			return false
+		}
+	}
+	return true
+}
+
+// fetchTargets fetches compiled patterns from the server.
+func (c *Client) fetchTargets() error {
 	resp, err := c.httpClient.Get(c.serverURI + "/api/targets/active")
 	if err != nil {
 		return err
@@ -198,18 +235,14 @@ func (c *Client) fetchTargetFull() error {
 	defer resp.Body.Close()
 
 	var result struct {
-		Data *vkg.Target `json:"data"`
+		Data []vkg.CompiledPattern `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("decode target: %w", err)
+		return fmt.Errorf("decode patterns: %w", err)
 	}
 
-	c.target.Store(result.Data)
-	if result.Data != nil {
-		c.logger.Debug("target fetched", "pattern", result.Data.Pattern)
-	} else {
-		c.logger.Debug("no active target")
-	}
+	c.patterns.Store(result.Data)
+	c.logger.Debug("patterns fetched", "count", len(result.Data))
 	return nil
 }
 
@@ -285,8 +318,6 @@ func (c *Client) sendHeartbeat() error {
 }
 
 func (c *Client) reportMatch(s seekerStatus) error {
-	t := c.currentTarget()
-
 	m := vkg.Match{
 		ClientID:             c.clientID,
 		Hostname:             c.hostname,
@@ -302,9 +333,6 @@ func (c *Client) reportMatch(s seekerStatus) error {
 			AuthorizedString: s.key.AuthorizedKey,
 			Fingerprint:      s.key.Fingerprint,
 		},
-	}
-	if t != nil {
-		m.TargetID = t.ID
 	}
 
 	b, err := json.Marshal(m)
@@ -367,7 +395,7 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 	}
 
 	// Fetch initial target
-	if err := c.fetchTargetFull(); err != nil {
+	if err := c.fetchTargets(); err != nil {
 		return fmt.Errorf("initial target fetch: %w", err)
 	}
 
@@ -398,7 +426,7 @@ loop:
 	for {
 		select {
 		case <-targetTicker.C:
-			if err := c.fetchTargetFull(); err != nil {
+			if err := c.fetchTargets(); err != nil {
 				c.logger.Error("failed to fetch target", "error", err)
 			}
 		case <-heartbeatTicker.C:

@@ -13,12 +13,14 @@ import (
 
 const schema = `
 CREATE TABLE IF NOT EXISTS targets (
-	id         TEXT PRIMARY KEY,
-	pattern    TEXT NOT NULL,
-	label      TEXT NOT NULL DEFAULT '',
-	active     INTEGER NOT NULL DEFAULT 0,
-	priority   INTEGER NOT NULL DEFAULT 0,
-	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	id             TEXT PRIMARY KEY,
+	type           TEXT NOT NULL DEFAULT 'regex',
+	pattern        TEXT NOT NULL,
+	label          TEXT NOT NULL DEFAULT '',
+	active         INTEGER NOT NULL DEFAULT 0,
+	case_sensitive INTEGER NOT NULL DEFAULT 0,
+	match_scope    TEXT NOT NULL DEFAULT 'both',
+	created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS matches (
@@ -77,6 +79,14 @@ func New(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// Add columns for existing databases (safe to fail if already present).
+	for _, stmt := range []string{
+		`ALTER TABLE targets ADD COLUMN type TEXT NOT NULL DEFAULT 'regex'`,
+		`ALTER TABLE targets ADD COLUMN case_sensitive INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE targets ADD COLUMN match_scope TEXT NOT NULL DEFAULT 'both'`,
+	} {
+		db.Exec(stmt) // ignore errors (column already exists)
+	}
 	return &Store{db: db}, nil
 }
 
@@ -90,29 +100,69 @@ func (s *Store) CreateTarget(ctx context.Context, t *vkg.Target) error {
 	if t.ID == "" {
 		t.ID = vkg.NewID()
 	}
+	if t.Type == "" {
+		t.Type = "regex"
+	}
+	if t.MatchScope == "" {
+		t.MatchScope = "both"
+	}
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO targets (id, pattern, label, active, priority, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Pattern, t.Label, t.Active, t.Priority, t.CreatedAt.Format(time.RFC3339))
+		`INSERT INTO targets (id, type, pattern, label, active, case_sensitive, match_scope, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Type, t.Pattern, t.Label, t.Active, t.CaseSensitive, t.MatchScope,
+		t.CreatedAt.Format(time.RFC3339))
 	return err
 }
 
 func (s *Store) ListTargets(ctx context.Context) ([]vkg.Target, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, pattern, label, active, priority, created_at FROM targets ORDER BY priority DESC, created_at DESC`)
+		`SELECT id, type, pattern, label, active, case_sensitive, match_scope, created_at
+		 FROM targets ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanTargets(rows)
+}
 
+func (s *Store) GetTarget(ctx context.Context, id string) (*vkg.Target, error) {
+	var t vkg.Target
+	var createdAt string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, type, pattern, label, active, case_sensitive, match_scope, created_at
+		 FROM targets WHERE id = ?`, id).
+		Scan(&t.ID, &t.Type, &t.Pattern, &t.Label, &t.Active, &t.CaseSensitive, &t.MatchScope, &createdAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	return &t, nil
+}
+
+func (s *Store) ListActiveTargets(ctx context.Context) ([]vkg.Target, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, type, pattern, label, active, case_sensitive, match_scope, created_at
+		 FROM targets WHERE active = 1 ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTargets(rows)
+}
+
+func scanTargets(rows *sql.Rows) ([]vkg.Target, error) {
 	var targets []vkg.Target
 	for rows.Next() {
 		var t vkg.Target
 		var createdAt string
-		if err := rows.Scan(&t.ID, &t.Pattern, &t.Label, &t.Active, &t.Priority, &createdAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Type, &t.Pattern, &t.Label, &t.Active,
+			&t.CaseSensitive, &t.MatchScope, &createdAt); err != nil {
 			return nil, err
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
@@ -121,42 +171,11 @@ func (s *Store) ListTargets(ctx context.Context) ([]vkg.Target, error) {
 	return targets, rows.Err()
 }
 
-func (s *Store) GetTarget(ctx context.Context, id string) (*vkg.Target, error) {
-	var t vkg.Target
-	var createdAt string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, pattern, label, active, priority, created_at FROM targets WHERE id = ?`, id).
-		Scan(&t.ID, &t.Pattern, &t.Label, &t.Active, &t.Priority, &createdAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	return &t, nil
-}
-
-func (s *Store) GetActiveTarget(ctx context.Context) (*vkg.Target, error) {
-	var t vkg.Target
-	var createdAt string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, pattern, label, active, priority, created_at FROM targets WHERE active = 1 ORDER BY priority DESC LIMIT 1`).
-		Scan(&t.ID, &t.Pattern, &t.Label, &t.Active, &t.Priority, &createdAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	return &t, nil
-}
-
 func (s *Store) UpdateTarget(ctx context.Context, t *vkg.Target) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE targets SET pattern = ?, label = ?, active = ?, priority = ? WHERE id = ?`,
-		t.Pattern, t.Label, t.Active, t.Priority, t.ID)
+		`UPDATE targets SET type = ?, pattern = ?, label = ?, active = ?,
+		 case_sensitive = ?, match_scope = ? WHERE id = ?`,
+		t.Type, t.Pattern, t.Label, t.Active, t.CaseSensitive, t.MatchScope, t.ID)
 	return err
 }
 
@@ -303,6 +322,13 @@ func (s *Store) MarkOfflineClients(ctx context.Context, threshold time.Duration)
 	cutoff := time.Now().UTC().Add(-threshold).Format(time.RFC3339)
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE clients SET status = 'offline' WHERE last_seen < ? AND status != 'offline'`, cutoff)
+	return err
+}
+
+func (s *Store) DeleteOfflineClients(ctx context.Context, threshold time.Duration) error {
+	cutoff := time.Now().UTC().Add(-threshold).Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM clients WHERE status = 'offline' AND last_seen < ?`, cutoff)
 	return err
 }
 

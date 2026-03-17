@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,6 +23,8 @@ var (
 	listenAddress string
 	dbPath        string
 	defaultTarget string
+	wordPrefix    string
+	wordSuffix    string
 )
 
 func FlagSet() *flag.FlagSet {
@@ -30,6 +33,8 @@ func FlagSet() *flag.FlagSet {
 	f.StringVar(&listenAddress, "b", "", "Bind address (default '' for all)")
 	f.StringVar(&dbPath, "d", "vkg.db", "SQLite database path")
 	f.StringVar(&defaultTarget, "t", "", "Default target pattern (creates if DB is empty)")
+	f.StringVar(&wordPrefix, "word-prefix", `[\/\+]`, "Regex prefix for word targets")
+	f.StringVar(&wordSuffix, "word-suffix", `=?$`, "Regex suffix for word targets")
 	return f
 }
 
@@ -57,7 +62,7 @@ func (s *Server) setupRouter() http.Handler {
 	// API routes
 	mux.HandleFunc("GET /api/targets", s.handleListTargets)
 	mux.HandleFunc("POST /api/targets", s.handleCreateTarget)
-	mux.HandleFunc("GET /api/targets/active", s.handleGetActiveTarget)
+	mux.HandleFunc("GET /api/targets/active", s.handleGetActiveTargets)
 	mux.HandleFunc("GET /api/targets/{id}", s.handleGetTarget)
 	mux.HandleFunc("PUT /api/targets/{id}", s.handleUpdateTarget)
 	mux.HandleFunc("DELETE /api/targets/{id}", s.handleDeleteTarget)
@@ -147,6 +152,9 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 	httpServer := &http.Server{
 		Addr:    addr,
 		Handler: srv.setupRouter(),
+		BaseContext: func(_ net.Listener) context.Context {
+			return ctx
+		},
 	}
 
 	serverErr := make(chan error, 1)
@@ -162,12 +170,14 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 		return fmt.Errorf("server error: %w", err)
 	case <-ctx.Done():
 		l.Info("Shutdown signal received")
+		// Close SSE hub first so all streaming connections return
+		srv.hub.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("server shutdown: %w", err)
+			l.Warn("HTTP shutdown timeout", "error", err)
 		}
-		l.Info("Server stopped gracefully")
+		l.Info("Server stopped")
 	}
 
 	return nil
@@ -182,23 +192,46 @@ func (s *Server) seedDefaultTarget(ctx context.Context, getenv func(string) stri
 		return nil
 	}
 
-	pattern := `(?i)[\/\+](nugget|slacker|wheelsdown|hollowoak|ferrari|porsche|gt3rs|portofino|longhorn|miata|equiraptor|nugget-info|vanitykey|vanity-nugget)=?$`
-	if defaultTarget != "" {
-		pattern = defaultTarget
+	// If a custom pattern is specified, seed it as a raw regex target.
+	if pattern := defaultTarget; pattern != "" {
+		return s.seedRegexTarget(ctx, pattern, "Default")
 	}
 	if val := getenv("VKG_TARGET"); val != "" {
-		pattern = val
+		return s.seedRegexTarget(ctx, val, "Default")
 	}
 
+	// Otherwise seed default word targets.
+	words := []string{
+		"nugget", "slacker", "wheelsdown", "hollowoak",
+		"ferrari", "porsche", "gt3rs", "portofino",
+		"longhorn", "miata", "equiraptor",
+	}
+	for _, w := range words {
+		t := &vkg.Target{
+			Type:    "word",
+			Pattern: w,
+			Label:   w,
+			Active:  true,
+		}
+		if err := s.store.CreateTarget(ctx, t); err != nil {
+			return fmt.Errorf("seed word target %q: %w", w, err)
+		}
+	}
+	s.logger.Info("Seeded default word targets", "count", len(words))
+	return nil
+}
+
+func (s *Server) seedRegexTarget(ctx context.Context, pattern, label string) error {
 	t := &vkg.Target{
+		Type:    "regex",
 		Pattern: pattern,
-		Label:   "Default",
+		Label:   label,
 		Active:  true,
 	}
 	if err := s.store.CreateTarget(ctx, t); err != nil {
-		return fmt.Errorf("seed default target: %w", err)
+		return fmt.Errorf("seed regex target: %w", err)
 	}
-	s.logger.Info("Seeded default target", "id", t.ID, "pattern", t.Pattern)
+	s.logger.Info("Seeded regex target", "id", t.ID, "pattern", t.Pattern)
 	return nil
 }
 
@@ -210,9 +243,16 @@ func (s *Server) clientReaper(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.store.MarkOfflineClients(ctx, 90*time.Second); err != nil {
+			// Use a detached context for DB operations so they aren't
+			// cancelled by the signal context mid-query.
+			dbCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := s.store.MarkOfflineClients(dbCtx, 90*time.Second); err != nil {
 				s.logger.Error("client reaper error", "error", err)
 			}
+			if err := s.store.DeleteOfflineClients(dbCtx, 5*time.Minute); err != nil {
+				s.logger.Error("client cleanup error", "error", err)
+			}
+			cancel()
 		}
 	}
 }

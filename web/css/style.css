@@ -176,6 +176,9 @@ dialog {
   max-width: 560px;
   width: 90vw;
 }
+dialog.dialog-wide {
+  max-width: 800px;
+}
 dialog::backdrop { background: rgba(0,0,0,0.6); }
 dialog h3 { margin-bottom: 1rem; }
 dialog label {
@@ -185,7 +188,8 @@ dialog label {
   color: var(--text-dim);
 }
 dialog input[type="text"],
-dialog input[type="number"] {
+dialog input[type="number"],
+dialog select {
   display: block;
   width: 100%;
   margin-top: 0.25rem;
@@ -261,6 +265,39 @@ footer {
 .sse-disconnected::before { content: '● '; }
 
 .mono { font-family: var(--mono); font-size: 0.8rem; }
+
+.badge-word { background: rgba(88,166,255,0.12); color: var(--accent); }
+.badge-regex { background: rgba(210,153,34,0.12); color: var(--yellow); }
+
+.active-target-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+}
+.active-target-item + .active-target-item {
+  border-top: 1px solid var(--border);
+}
+
+.copyable-section {
+  position: relative;
+}
+.btn-copy {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.btn-copy:hover { color: var(--text); background: var(--border); }
+.btn-copy.copied { color: var(--green); border-color: var(--green); }
+
+tr.clickable { cursor: pointer; }
 
 @media (max-width: 768px) {
   header { flex-direction: column; gap: 0.75rem; padding: 1rem; }

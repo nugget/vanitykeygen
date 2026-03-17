@@ -40,8 +40,8 @@
         </div>
       </div>
       <div class="section">
-        <h2>Active Target</h2>
-        <div id="active-target" class="active-target-display">Loading...</div>
+        <h2>Active Targets</h2>
+        <div id="active-targets" class="active-target-display">Loading...</div>
       </div>
       <div class="section">
         <h2>Recent Matches</h2>
@@ -71,16 +71,30 @@
           <h3 id="target-dialog-title">New Target</h3>
           <input type="hidden" id="target-id">
           <label>
-            Pattern (regex)
-            <input type="text" id="target-pattern" required placeholder="(?i)pattern$">
+            Type
+            <select id="target-type">
+              <option value="word">Word</option>
+              <option value="regex">Regex</option>
+            </select>
+          </label>
+          <label>
+            <span id="target-pattern-label">Word</span>
+            <input type="text" id="target-pattern" required placeholder="nugget">
           </label>
           <label>
             Label
             <input type="text" id="target-label" placeholder="Human-friendly name">
           </label>
           <label>
-            Priority
-            <input type="number" id="target-priority" value="0">
+            Match Against
+            <select id="target-match-scope">
+              <option value="both">Both</option>
+              <option value="fingerprint">Fingerprint only</option>
+              <option value="pubkey">Public key only</option>
+            </select>
+          </label>
+          <label class="checkbox-label" id="target-case-sensitive-row">
+            <input type="checkbox" id="target-case-sensitive"> Case sensitive
           </label>
           <label class="checkbox-label">
             <input type="checkbox" id="target-active"> Active
@@ -95,9 +109,10 @@
         <thead>
           <tr>
             <th>Status</th>
+            <th>Type</th>
             <th>Label</th>
             <th>Pattern</th>
-            <th>Priority</th>
+            <th>Scope</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -117,13 +132,12 @@
             <th>Fingerprint</th>
             <th>Auth Key</th>
             <th>Client</th>
-            <th>Actions</th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
       <div class="empty-state" id="matches-empty">No matches found</div>
-      <dialog id="match-detail-dialog">
+      <dialog id="match-detail-dialog" class="dialog-wide">
         <h3>Match Details</h3>
         <div id="match-detail-content"></div>
         <div class="dialog-actions">

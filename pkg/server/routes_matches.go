@@ -2,7 +2,9 @@ package server
 
 import (
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/nugget/vanitykeygen/pkg/vkg"
 )
@@ -56,6 +58,13 @@ func (s *Server) handlePostMatch(w http.ResponseWriter, r *http.Request) {
 		"matchString", m.MatchString,
 	)
 
+	// Attribute match to a specific target if not already set.
+	if m.TargetID == "" {
+		if tid := s.attributeMatch(r, &m); tid != "" {
+			m.TargetID = tid
+		}
+	}
+
 	if err := s.store.RecordMatch(r.Context(), &m); err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -63,4 +72,57 @@ func (s *Server) handlePostMatch(w http.ResponseWriter, r *http.Request) {
 
 	s.hub.Broadcast("match", m)
 	s.writeJSON(w, http.StatusCreated, map[string]any{"data": m})
+}
+
+// attributeMatch tests a match against active targets to find which one it belongs to.
+func (s *Server) attributeMatch(r *http.Request, m *vkg.Match) string {
+	targets, err := s.store.ListActiveTargets(r.Context())
+	if err != nil {
+		return ""
+	}
+
+	for _, t := range targets {
+		var pattern string
+		if t.Type == "word" {
+			word := regexp.QuoteMeta(t.Pattern)
+			if t.CaseSensitive {
+				pattern = wordPrefix + word + wordSuffix
+			} else {
+				pattern = "(?i)" + wordPrefix + word + wordSuffix
+			}
+		} else {
+			pattern = t.Pattern
+		}
+
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			continue
+		}
+
+		scope := t.MatchScope
+		if scope == "" {
+			scope = "both"
+		}
+
+		if (scope == "fingerprint" || scope == "both") && m.MatchedFingerprint {
+			if re.MatchString(m.Key.Fingerprint) {
+				return t.ID
+			}
+		}
+		if (scope == "pubkey" || scope == "both") && m.MatchedAuthorizedKey {
+			if re.MatchString(m.Key.AuthorizedString) {
+				return t.ID
+			}
+		}
+
+		// Also check match string directly for word targets
+		if t.Type == "word" {
+			matchLower := strings.ToLower(m.MatchString)
+			wordLower := strings.ToLower(t.Pattern)
+			if strings.Contains(matchLower, wordLower) {
+				return t.ID
+			}
+		}
+	}
+	return ""
 }

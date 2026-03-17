@@ -50,17 +50,17 @@ func (s *Server) handleGetTarget(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]any{"data": t})
 }
 
-func (s *Server) handleGetActiveTarget(w http.ResponseWriter, r *http.Request) {
-	t, err := s.store.GetActiveTarget(r.Context())
+func (s *Server) handleGetActiveTargets(w http.ResponseWriter, r *http.Request) {
+	targets, err := s.store.ListActiveTargets(r.Context())
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if t == nil {
-		s.writeJSON(w, http.StatusOK, map[string]any{"data": nil})
-		return
+	compiled := compilePatterns(targets)
+	if compiled == nil {
+		compiled = []vkg.CompiledPattern{}
 	}
-	s.writeJSON(w, http.StatusOK, map[string]any{"data": t})
+	s.writeJSON(w, http.StatusOK, map[string]any{"data": compiled})
 }
 
 func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request) {

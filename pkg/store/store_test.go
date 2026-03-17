@@ -22,7 +22,7 @@ func TestTargetCRUD(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 
-	tgt := &vkg.Target{Pattern: "(?i)test$", Label: "Test", Active: true, Priority: 1}
+	tgt := &vkg.Target{Pattern: "(?i)test$", Label: "Test", Active: true}
 	if err := s.CreateTarget(ctx, tgt); err != nil {
 		t.Fatalf("CreateTarget: %v", err)
 	}
@@ -51,13 +51,13 @@ func TestTargetCRUD(t *testing.T) {
 		t.Errorf("unexpected target: %+v", got)
 	}
 
-	// Active
-	active, err := s.GetActiveTarget(ctx)
+	// Active targets
+	activeTargets, err := s.ListActiveTargets(ctx)
 	if err != nil {
-		t.Fatalf("GetActiveTarget: %v", err)
+		t.Fatalf("ListActiveTargets: %v", err)
 	}
-	if active == nil || active.ID != tgt.ID {
-		t.Errorf("expected active target %s, got %+v", tgt.ID, active)
+	if len(activeTargets) != 1 || activeTargets[0].ID != tgt.ID {
+		t.Errorf("expected 1 active target %s, got %+v", tgt.ID, activeTargets)
 	}
 
 	// Update
