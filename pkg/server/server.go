@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/nugget/vanitykeygen/pkg/store"
@@ -130,6 +131,14 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 
 	if val := getenv("VKG_DB_PATH"); val != "" {
 		dbPath = val
+	}
+	if val := getenv("VKG_LISTEN_PORT"); val != "" {
+		if p, err := strconv.Atoi(val); err == nil {
+			listenPort = p
+		}
+	}
+	if val := getenv("VKG_LISTEN_ADDRESS"); val != "" {
+		listenAddress = val
 	}
 
 	st, err := store.New(dbPath)

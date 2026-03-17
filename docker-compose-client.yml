@@ -1,0 +1,7 @@
+services:
+  client:
+    image: ghcr.io/nugget/vanitykeygen:latest
+    restart: unless-stopped
+    command: ["/bin/vkg", "client"]
+    environment:
+      - VKG_SERVER_URI=http://server:8080
