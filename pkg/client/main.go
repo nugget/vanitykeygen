@@ -1,11 +1,9 @@
 package client
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"flag"
 	"fmt"
 	"io"
@@ -14,31 +12,41 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/nugget/vanitykeygen/pkg/keygen"
 	"github.com/nugget/vanitykeygen/pkg/vkg"
-
-	"github.com/mikesmitty/edkey"
-	"golang.org/x/crypto/ed25519"
-	"golang.org/x/crypto/ssh"
 )
 
 var (
-	logger   *slog.Logger
-	logLevel *slog.LevelVar
-	target   string
-
-	serverURI string
+	serverURI  string
+	numSeekers int
 )
 
 func FlagSet() *flag.FlagSet {
-	f := flag.NewFlagSet("server", flag.ExitOnError)
-
-	f.StringVar(&serverURI, "s", "https://vkg", "vkg server URI (default 'https://vkg')")
-
+	f := flag.NewFlagSet("client", flag.ExitOnError)
+	f.StringVar(&serverURI, "s", "https://vkg", "VKG server URI")
+	f.IntVar(&numSeekers, "n", runtime.NumCPU(), "Number of seeker goroutines")
 	return f
+}
+
+// Client is the VKG key-searching client.
+type Client struct {
+	logger     *slog.Logger
+	httpClient *http.Client
+	serverURI  string
+	clientID   string
+	hostname   string
+	version    string
+	seekers    int
+
+	target   atomic.Value // stores *vkg.Target (or nil)
+	keyCount atomic.Int64
 }
 
 type seekerStatus struct {
@@ -48,23 +56,7 @@ type seekerStatus struct {
 	matchString          string
 	matchedAuthorizedKey bool
 	matchedFingerprint   bool
-	key                  GenerateKeyResult
-}
-
-type telemetry struct {
-	launchStartTime time.Time
-	searchStartTime time.Time
-	keyCount        int
-	hitCount        int
-}
-
-func newTelemetry() telemetry {
-	return telemetry{
-		launchStartTime: time.Now(),
-		searchStartTime: time.Now(),
-		keyCount:        1,
-		hitCount:        0,
-	}
+	key                  keygen.Result
 }
 
 func (s seekerStatus) LogValue() slog.Value {
@@ -74,120 +66,118 @@ func (s seekerStatus) LogValue() slog.Value {
 		slog.Int("keyCount", s.keyCount),
 		slog.Bool("matchedAuthorizedKey", s.matchedAuthorizedKey),
 		slog.Bool("matchedFingerprint", s.matchedFingerprint),
-		slog.String("fingerprint", s.key.fingerprint),
-		slog.String("auth", s.key.authorizedKey),
+		slog.String("fingerprint", s.key.Fingerprint),
+		slog.String("auth", s.key.AuthorizedKey),
 	)
 }
 
-type GenerateKeyResult struct {
-	publicKey     ed25519.PublicKey
-	privateKey    ed25519.PrivateKey
-	sshKey        ssh.PublicKey
-	pemKey        *pem.Block
-	authorizedKey string
-	fingerprint   string
-	encodedKey    []byte
+type telemetry struct {
+	launchStartTime time.Time
+	keyCount        int
+	hitCount        int
 }
 
-func GenerateKey(w io.Reader) (GenerateKeyResult, error) {
-	var (
-		k   GenerateKeyResult
-		err error
-	)
-
-	k.publicKey, k.privateKey, err = ed25519.GenerateKey(w)
-	if err != nil {
-		return GenerateKeyResult{}, err
+func (c *Client) currentTarget() *vkg.Target {
+	v := c.target.Load()
+	if v == nil {
+		return nil
 	}
-
-	k.sshKey, err = ssh.NewPublicKey(k.publicKey)
-	if err != nil {
-		return GenerateKeyResult{}, err
-	}
-
-	k.pemKey = &pem.Block{
-		Type:  "OPENSSH PRIVATE KEY",
-		Bytes: edkey.MarshalED25519PrivateKey(k.privateKey),
-	}
-
-	k.encodedKey = pem.EncodeToMemory(k.pemKey)
-
-	k.authorizedKey = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(k.sshKey)))
-
-	h := sha256.New()
-	h.Write(k.sshKey.Marshal())
-	k.fingerprint = base64.StdEncoding.EncodeToString(h.Sum(nil))
-
-	return k, nil
+	return v.(*vkg.Target)
 }
 
-func seeker(ctx context.Context, statusUpdates chan seekerStatus, sid int) {
-	logger := logger.With("sid", sid)
+func (c *Client) seeker(ctx context.Context, statusUpdates chan<- seekerStatus, sid int) {
+	logger := c.logger.With("sid", sid)
 	logger.Info("seeker starting")
 
 	var (
-		lastTarget string
-		re         *regexp.Regexp
-		err        error
+		lastPattern string
+		re          *regexp.Regexp
 	)
 
-	statusTrigger := time.Tick(5 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
 	keyCount := 0
 
 	for {
-		if target != lastTarget {
-			re, err = regexp.Compile(target)
-			if err != nil {
-				logger.Error("unable to compile regexp", "error", err)
-			}
-			logger.Warn("new target detected", "lastTarget", lastTarget, "target", target, "re", re)
-			lastTarget = target
+		select {
+		case <-ctx.Done():
+			logger.Info("seeker stopping")
+			return
+		default:
 		}
 
-		if target == "" {
-			logger.Info("no current target, sleeping")
-			time.Sleep(1 * time.Minute)
-		} else {
+		t := c.currentTarget()
+		if t == nil || t.Pattern == "" {
+			time.Sleep(1 * time.Second)
+			continue
+		}
 
-			k, err := GenerateKey(nil)
+		if t.Pattern != lastPattern {
+			var err error
+			re, err = regexp.Compile(t.Pattern)
 			if err != nil {
-				logger.Warn("error generating key", "error", err)
-				time.Sleep(1 * time.Minute)
+				logger.Error("unable to compile regexp", "pattern", t.Pattern, "error", err)
+				re = nil
+				lastPattern = t.Pattern
+				time.Sleep(5 * time.Second)
+				continue
 			}
+			logger.Info("new target pattern", "pattern", t.Pattern)
+			lastPattern = t.Pattern
+		}
 
-			matchedFingerprint := re.MatchString(k.fingerprint)
-			matchedAuthorizedKey := re.MatchString(k.authorizedKey)
+		if re == nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
 
-			if matchedFingerprint || matchedAuthorizedKey {
-				var matchString strings.Builder
-				matchString.WriteString(re.FindString(k.fingerprint))
-				matchString.WriteString(re.FindString(k.authorizedKey))
+		k, err := keygen.Generate()
+		if err != nil {
+			logger.Warn("error generating key", "error", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
 
-				s := seekerStatus{
-					timestamp:            time.Now(),
-					sid:                  sid,
-					matchString:          matchString.String(),
-					keyCount:             keyCount,
-					matchedAuthorizedKey: matchedAuthorizedKey,
-					matchedFingerprint:   matchedFingerprint,
-					key:                  k,
-				}
-				statusUpdates <- s
+		c.keyCount.Add(1)
 
-				keyCount = 0
+		matchedFingerprint := re.MatchString(k.Fingerprint)
+		matchedAuthorizedKey := re.MatchString(k.AuthorizedKey)
+
+		if matchedFingerprint || matchedAuthorizedKey {
+			var matchString strings.Builder
+			matchString.WriteString(re.FindString(k.Fingerprint))
+			matchString.WriteString(re.FindString(k.AuthorizedKey))
+
+			s := seekerStatus{
+				timestamp:            time.Now(),
+				sid:                  sid,
+				matchString:          matchString.String(),
+				keyCount:             keyCount,
+				matchedAuthorizedKey: matchedAuthorizedKey,
+				matchedFingerprint:   matchedFingerprint,
+				key:                  k,
 			}
+			select {
+			case statusUpdates <- s:
+			case <-ctx.Done():
+				return
+			}
+			keyCount = 0
 		}
 
 		select {
-		case <-statusTrigger:
+		case <-ticker.C:
 			s := seekerStatus{
 				timestamp: time.Now(),
 				sid:       sid,
 				keyCount:  keyCount,
-				key:       GenerateKeyResult{},
 			}
-			statusUpdates <- s
+			select {
+			case statusUpdates <- s:
+			case <-ctx.Done():
+				return
+			}
 			keyCount = 0
 		default:
 			keyCount++
@@ -195,159 +185,232 @@ func seeker(ctx context.Context, statusUpdates chan seekerStatus, sid int) {
 	}
 }
 
-func displayStats(t *telemetry) {
-	launchDuration := time.Now().Sub(t.launchStartTime)
-	searchDuration := time.Now().Sub(t.searchStartTime)
+// fetchTargetFull fetches and stores the active target from the server.
+func (c *Client) fetchTargetFull() error {
+	resp, err := c.httpClient.Get(c.serverURI + "/api/targets/active")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 
-	hitRate := float64(t.hitCount) / float64(t.keyCount) * 100
-
-	logger.Debug("Runtime Stats",
-		"launchDuration", launchDuration,
-		"searchDuration", searchDuration,
-		"keyCount", t.keyCount,
-		"hitCount", t.hitCount,
-		"hitRate", hitRate,
-	)
-}
-
-func recordStatus(s seekerStatus, t *telemetry) error {
-	t.keyCount += s.keyCount
-
-	if s.key.fingerprint != "" {
-		logger.Warn("run select hit", "s", s)
-		// fmt.Printf("%s:\n%s\n", s.key.authorizedKey, s.key.encodedKey)
-		t.hitCount++
-
-		p := vkg.Match{}
-		p.Hostname, _ = os.Hostname()
-		p.SeekerID = s.sid
-		p.Key.PrivateKey = s.key.privateKey
-		p.Key.PublicKey = s.key.publicKey
-		p.Key.EncodedKey = s.key.encodedKey
-		p.Key.PrivateString = fmt.Sprintf("%s", s.key.encodedKey)
-		p.Key.AuthorizedString = s.key.authorizedKey
-		p.Key.Fingerprint = s.key.fingerprint
-		p.MatchString = s.matchString
-		p.MatchedAuthorizedKey = s.matchedAuthorizedKey
-		p.MatchedFingerprint = s.matchedFingerprint
-
-		b, err := json.Marshal(p)
-		if err != nil {
-			return fmt.Errorf("json.Marshal: %w", err)
-		}
-
-		requestBody := strings.NewReader(string(b))
-
-		_, err = http.Post(serverURI+"/match", "application/json", requestBody)
-		if err != nil {
-			return fmt.Errorf("http.Post: %w", err)
-		}
-
+	var result struct {
+		Data *vkg.Target `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode target: %w", err)
 	}
 
+	c.target.Store(result.Data)
+	if result.Data != nil {
+		c.logger.Debug("target fetched", "pattern", result.Data.Pattern)
+	} else {
+		c.logger.Debug("no active target")
+	}
 	return nil
 }
 
-func myVersion() string {
-	v := "unknown"
-
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		logger.Warn("error reading build info")
-	} else {
-		for _, s := range info.Settings {
-			if s.Key == "vcs.time" {
-				v = s.Value
-			}
-		}
+func (c *Client) register() error {
+	req := vkg.RegisterRequest{
+		Hostname: c.hostname,
+		Version:  c.version,
+		Seekers:  c.seekers,
 	}
-
-	return v
-}
-
-func getTarget() (string, error) {
-	r, err := http.Get(serverURI + "/target")
-	if err != nil {
-		return "", err
-	}
-	logger.Debug("target requested", "code", r.StatusCode)
-
-	var t vkg.Target
-
-	decoder := json.NewDecoder(r.Body)
-	err = decoder.Decode(&t)
-	if err != nil {
-		logger.Error("Decoder Failed", "error", err)
-	}
-
-	logger.Debug("target is", "target", t.MatchString)
-
-	return t.MatchString, nil
-}
-
-// run is the real main, but one where we can exit with an error.
-func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer, getenv func(string) string, args []string) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
-	logger = l
-
-	myFlags := FlagSet()
-	err := myFlags.Parse(args)
+	b, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
 
-	val := getenv("VKG_SERVER_URI")
-	if val != "" {
+	resp, err := c.httpClient.Post(c.serverURI+"/api/clients/register", "application/json", bytes.NewReader(b))
+	if err != nil {
+		return fmt.Errorf("register: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data vkg.RegisterResponse `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode register response: %w", err)
+	}
+
+	c.clientID = result.Data.ClientID
+	c.logger.Info("registered with server", "clientId", c.clientID)
+	return nil
+}
+
+func (c *Client) sendHeartbeat() error {
+	hb := vkg.Heartbeat{
+		ClientID: c.clientID,
+		Hostname: c.hostname,
+		Version:  c.version,
+		Seekers:  c.seekers,
+		KeyCount: c.keyCount.Load(),
+	}
+	b, err := json.Marshal(hb)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Post(c.serverURI+"/api/clients/heartbeat", "application/json", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+func (c *Client) reportMatch(s seekerStatus) error {
+	t := c.currentTarget()
+
+	m := vkg.Match{
+		ClientID:             c.clientID,
+		Hostname:             c.hostname,
+		SeekerID:             s.sid,
+		MatchString:          s.matchString,
+		MatchedAuthorizedKey: s.matchedAuthorizedKey,
+		MatchedFingerprint:   s.matchedFingerprint,
+		Key: vkg.Key{
+			PrivateKey:       s.key.PrivateKey,
+			PublicKey:        s.key.PublicKey,
+			EncodedKey:       s.key.EncodedKey,
+			PrivateString:    string(s.key.EncodedKey),
+			AuthorizedString: s.key.AuthorizedKey,
+			Fingerprint:      s.key.Fingerprint,
+		},
+	}
+	if t != nil {
+		m.TargetID = t.ID
+	}
+
+	b, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal match: %w", err)
+	}
+
+	resp, err := c.httpClient.Post(c.serverURI+"/api/matches", "application/json", bytes.NewReader(b))
+	if err != nil {
+		return fmt.Errorf("post match: %w", err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.time" {
+			return s.Value
+		}
+	}
+	return "unknown"
+}
+
+// Run starts the client. It blocks until interrupted or a fatal error occurs.
+func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer, getenv func(string) string, args []string) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	defer stop()
+
+	myFlags := FlagSet()
+	if err := myFlags.Parse(args); err != nil {
+		return err
+	}
+
+	if val := getenv("VKG_SERVER_URI"); val != "" {
 		serverURI = val
 	}
 
-	target, err = getTarget()
-	if err != nil {
-		return err
+	hostname, _ := os.Hostname()
+
+	c := &Client{
+		logger:    l,
+		serverURI: serverURI,
+		hostname:  hostname,
+		version:   buildVersion(),
+		seekers:   numSeekers,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}
 
-	statusUpdates := make(chan seekerStatus)
+	// Register with server
+	if err := c.register(); err != nil {
+		return fmt.Errorf("registration failed: %w", err)
+	}
 
-	go seeker(ctx, statusUpdates, 1)
-	go seeker(ctx, statusUpdates, 2)
-	go seeker(ctx, statusUpdates, 3)
+	// Fetch initial target
+	if err := c.fetchTargetFull(); err != nil {
+		return fmt.Errorf("initial target fetch: %w", err)
+	}
 
-	runtimeStats := newTelemetry()
-	statsTrigger := time.Tick(5 * time.Second)
-	checkTarget := time.Tick(20 * time.Second)
+	statusUpdates := make(chan seekerStatus, c.seekers*2)
 
-RunLoop:
+	// Launch seekers
+	var wg sync.WaitGroup
+	for i := 1; i <= c.seekers; i++ {
+		wg.Add(1)
+		go func(sid int) {
+			defer wg.Done()
+			c.seeker(ctx, statusUpdates, sid)
+		}(i)
+	}
+
+	stats := telemetry{
+		launchStartTime: time.Now(),
+	}
+
+	statsTicker := time.NewTicker(5 * time.Second)
+	defer statsTicker.Stop()
+	targetTicker := time.NewTicker(20 * time.Second)
+	defer targetTicker.Stop()
+	heartbeatTicker := time.NewTicker(15 * time.Second)
+	defer heartbeatTicker.Stop()
+
+loop:
 	for {
 		select {
-		case <-checkTarget:
-			target, err = getTarget()
-			if err != nil {
-				target = ""
-				logger.Error("Unable to fetch target", "error", err)
+		case <-targetTicker.C:
+			if err := c.fetchTargetFull(); err != nil {
+				c.logger.Error("failed to fetch target", "error", err)
 			}
-			// runtimeStats.searchStartTime = time.Now()
-			// runtimeStats.keyCount = 1
-			// runtimeStats.hitCount = 0
-		case <-statsTrigger:
-			displayStats(&runtimeStats)
+		case <-heartbeatTicker.C:
+			if err := c.sendHeartbeat(); err != nil {
+				c.logger.Warn("heartbeat failed", "error", err)
+			}
+		case <-statsTicker.C:
+			hitRate := float64(0)
+			if stats.keyCount > 0 {
+				hitRate = float64(stats.hitCount) / float64(stats.keyCount) * 100
+			}
+			c.logger.Debug("stats",
+				"duration", time.Since(stats.launchStartTime),
+				"keys", stats.keyCount,
+				"hits", stats.hitCount,
+				"hitRate", hitRate,
+			)
 		case s := <-statusUpdates:
-			err := recordStatus(s, &runtimeStats)
-			if err != nil {
-				logger.Warn("unable to record status",
-					"hit", s,
-					"error", err,
-				)
+			stats.keyCount += s.keyCount
+
+			if s.key.Fingerprint != "" {
+				stats.hitCount++
+				c.logger.Info("match found", "s", s)
+
+				if err := c.reportMatch(s); err != nil {
+					c.logger.Warn("failed to report match", "error", err)
+				}
 			}
 		case <-ctx.Done():
-			stop()
-			break RunLoop
-		default:
-			time.Sleep(250 * time.Millisecond)
+			break loop
 		}
 	}
-	logger.Warn("interrupt detected", "err", ctx.Err())
+
+	c.logger.Info("shutting down, waiting for seekers...")
+	wg.Wait()
+	c.logger.Info("shutdown complete")
 
 	return nil
 }

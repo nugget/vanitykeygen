@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VKG - Vanity Key Generator</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>VKG</h1>
+    <nav>
+      <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="targets">Targets</button>
+      <button class="tab" data-tab="matches">Matches</button>
+      <button class="tab" data-tab="fleet">Fleet</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Dashboard -->
+    <section id="dashboard" class="panel active">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Active Clients</div>
+          <div class="stat-value" id="stat-clients">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Key Rate</div>
+          <div class="stat-value" id="stat-keyrate">-</div>
+          <div class="stat-unit">keys/sec</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Keys</div>
+          <div class="stat-value" id="stat-keycount">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Matches</div>
+          <div class="stat-value" id="stat-matches">-</div>
+        </div>
+      </div>
+      <div class="section">
+        <h2>Active Target</h2>
+        <div id="active-target" class="active-target-display">Loading...</div>
+      </div>
+      <div class="section">
+        <h2>Recent Matches</h2>
+        <table id="recent-matches-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Match</th>
+              <th>Type</th>
+              <th>Client</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty-state" id="recent-matches-empty">No matches yet</div>
+      </div>
+    </section>
+
+    <!-- Targets -->
+    <section id="targets" class="panel">
+      <div class="section-header">
+        <h2>Targets</h2>
+        <button id="btn-new-target" class="btn btn-primary">New Target</button>
+      </div>
+      <dialog id="target-dialog">
+        <form id="target-form" method="dialog">
+          <h3 id="target-dialog-title">New Target</h3>
+          <input type="hidden" id="target-id">
+          <label>
+            Pattern (regex)
+            <input type="text" id="target-pattern" required placeholder="(?i)pattern$">
+          </label>
+          <label>
+            Label
+            <input type="text" id="target-label" placeholder="Human-friendly name">
+          </label>
+          <label>
+            Priority
+            <input type="number" id="target-priority" value="0">
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="target-active"> Active
+          </label>
+          <div class="dialog-actions">
+            <button type="button" class="btn" id="btn-cancel-target">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </dialog>
+      <table id="targets-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Label</th>
+            <th>Pattern</th>
+            <th>Priority</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty-state" id="targets-empty">No targets configured</div>
+    </section>
+
+    <!-- Matches -->
+    <section id="matches" class="panel">
+      <h2>Matches</h2>
+      <table id="matches-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Match</th>
+            <th>Fingerprint</th>
+            <th>Auth Key</th>
+            <th>Client</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty-state" id="matches-empty">No matches found</div>
+      <dialog id="match-detail-dialog">
+        <h3>Match Details</h3>
+        <div id="match-detail-content"></div>
+        <div class="dialog-actions">
+          <button type="button" class="btn" id="btn-close-match-detail">Close</button>
+        </div>
+      </dialog>
+    </section>
+
+    <!-- Fleet -->
+    <section id="fleet" class="panel">
+      <h2>Fleet</h2>
+      <table id="fleet-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Hostname</th>
+            <th>Client ID</th>
+            <th>Seekers</th>
+            <th>Key Rate</th>
+            <th>Total Keys</th>
+            <th>Last Seen</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty-state" id="fleet-empty">No clients connected</div>
+    </section>
+  </main>
+
+  <footer>
+    <span id="sse-status" class="sse-disconnected">Disconnected</span>
+  </footer>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -37,7 +37,7 @@ oci-version-major=$(shell echo $(oci-version-point) | cut -f 1 -d .)
 
 LD_FLAGS="-X 'main.gitVersion=$(OCI_IMAGE_VERSION)'"
 
-.PHONY: debug logs builddir vkg vkgstatic
+.PHONY: debug builddir vkg vkgstatic test
 
 debug:
 	@echo "OCI Version: $(OCI_IMAGE_VERSION)"
@@ -46,9 +46,6 @@ debug:
 clean:
 	rm -f vkg-static-build
 	-docker buildx rm $(builder)
-
-logs:
-	tail -f matchfile.log | jq 
 
 builddir:
 	mkdir -p $(BUILD_DIR)
@@ -87,4 +84,7 @@ runserver: debug vkg
 
 runclient: debug vkg
 	$(VKG_BINARY) client
+
+test:
+	go test ./...
 

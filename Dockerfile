@@ -1,21 +1,19 @@
-FROM alpine:latest AS builder
+FROM golang:alpine AS builder
 
-RUN apk update && apk upgrade && apk add git make go
+RUN apk add --no-cache git make
 
 WORKDIR /build
 
-COPY . .
-
+COPY go.mod go.sum ./
 RUN go mod download
-RUN go mod verify
 
+COPY . .
 RUN make vkgstatic
 
 FROM alpine:latest
 COPY --from=builder /build/vkg-static-build /bin/vkg
-RUN mkdir -p /vkgdata/keys
-RUN mkdir -p /vkgdata/logs
+RUN mkdir -p /vkgdata
 
 EXPOSE 8080
 
-CMD ["/bin/vkg", "server", "-l", "/vkgdata/logs/matchfile.log"]
+CMD ["/bin/vkg", "server", "-d", "/vkgdata/vkg.db"]

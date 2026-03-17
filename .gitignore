@@ -4,3 +4,5 @@
 build
 *.log
 vkg-static-build
+/vkg
+*.db

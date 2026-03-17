@@ -13,76 +13,74 @@ import (
 	"github.com/nugget/vanitykeygen/pkg/server"
 )
 
-var (
-	logger   *slog.Logger
-	logLevel *slog.LevelVar
-)
+var logger *slog.Logger
 
-func setupLogger(ctx context.Context, stdout io.Writer) {
-	logLevel = new(slog.LevelVar)
-
-	handlerOptions := &slog.HandlerOptions{
-		Level: logLevel,
+func setupLogger(stdout io.Writer, verbose bool) {
+	level := slog.LevelInfo
+	if verbose {
+		level = slog.LevelDebug
 	}
-	handler := slog.NewTextHandler(stdout, handlerOptions)
+	handler := slog.NewTextHandler(stdout, &slog.HandlerOptions{Level: level})
 	logger = slog.New(handler)
 }
 
-func FlagSet() *flag.FlagSet {
-	f := flag.NewFlagSet("client", flag.ExitOnError)
-
-	return f
-}
-
-func usage(f *flag.FlagSet) {
-	fmt.Println("usage: <command> [<args>]")
-	fmt.Println("")
-	fmt.Println("global options")
-	f.PrintDefaults()
-	fmt.Println("client options")
+func usage() {
+	fmt.Println("usage: vkg <command> [options]")
+	fmt.Println()
+	fmt.Println("commands:")
+	fmt.Println("  server    Start the VKG server")
+	fmt.Println("  client    Start a VKG client")
+	fmt.Println("  version   Show version info")
+	fmt.Println()
+	fmt.Println("server options:")
+	server.FlagSet().PrintDefaults()
+	fmt.Println()
+	fmt.Println("client options:")
 	client.FlagSet().PrintDefaults()
-
 	os.Exit(0)
 }
 
-// run is the real main, but one where we can exit with an error.
+var gitVersion = "dev"
+
 func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(string) string, args []string) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
-	setupLogger(ctx, stdout)
+	// Parse global flags
+	verbose := false
+	globalFlags := flag.NewFlagSet("vkg", flag.ContinueOnError)
+	globalFlags.BoolVar(&verbose, "v", false, "Verbose (debug) logging")
+	globalFlags.Parse(args[1:])
 
-	globalFlagSet := FlagSet()
+	setupLogger(stdout, verbose)
 
-	err := globalFlagSet.Parse(args[1:])
-	if err != nil {
-		return err
+	remaining := globalFlags.Args()
+	if len(remaining) == 0 {
+		usage()
 	}
 
-	if len(args) < 2 {
-		usage(globalFlagSet)
-	}
+	cmd := remaining[0]
+	cmdArgs := remaining[1:]
 
-	logger.Debug("Launching vkg", "args", args)
-
-	switch args[1] {
+	switch cmd {
 	case "server":
-		return server.Run(ctx, logger, os.Stdout, os.Stderr, os.Getenv, os.Args[2:])
+		return server.Run(ctx, logger, stdout, stderr, getenv, cmdArgs)
 	case "client":
-		return client.Run(ctx, logger, os.Stdout, os.Stderr, os.Getenv, os.Args[2:])
+		return client.Run(ctx, logger, stdout, stderr, getenv, cmdArgs)
+	case "version":
+		fmt.Fprintf(stdout, "vkg %s\n", gitVersion)
+		return nil
 	default:
-		usage(globalFlagSet)
+		usage()
 	}
 
 	return nil
 }
 
-// main does as little as we can get away with.
 func main() {
 	ctx := context.Background()
-
 	if err := run(ctx, os.Stdout, os.Stderr, os.Getenv, os.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
 }
