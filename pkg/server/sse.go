@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // Hub manages SSE client connections and broadcasts events.
@@ -67,6 +68,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
+
+	// Send initial comment so the browser fires onopen immediately
+	fmt.Fprintf(w, ": connected\n\n")
 	flusher.Flush()
 
 	ch, unsubscribe := s.hub.Subscribe()
@@ -75,6 +79,10 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		unsubscribe()
 	}()
 
+	// Periodic keep-alive to prevent proxy/browser timeouts
+	keepAlive := time.NewTicker(15 * time.Second)
+	defer keepAlive.Stop()
+
 	ctx := r.Context()
 	for {
 		select {
@@ -82,6 +90,11 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 			return
 		case msg := <-ch:
 			if _, err := w.Write(msg); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-keepAlive.C:
+			if _, err := fmt.Fprintf(w, ": keepalive\n\n"); err != nil {
 				return
 			}
 			flusher.Flush()
