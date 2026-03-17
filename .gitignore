@@ -2,6 +2,7 @@
 .idea
 *.paw
 build
+dist
 *.log
 vkg-static-build
 /vkg
