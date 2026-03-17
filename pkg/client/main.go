@@ -45,8 +45,10 @@ type Client struct {
 	version    string
 	seekers    int
 
-	target   atomic.Value // stores *vkg.Target (or nil)
-	keyCount atomic.Int64
+	target        atomic.Value // stores *vkg.Target (or nil)
+	keyCount      atomic.Int64
+	lastHeartbeat time.Time
+	lastKeyCount  int64
 }
 
 type seekerStatus struct {
@@ -239,12 +241,24 @@ func (c *Client) register() error {
 }
 
 func (c *Client) sendHeartbeat() error {
+	now := time.Now()
+	currentCount := c.keyCount.Load()
+
+	var keyRate float64
+	elapsed := now.Sub(c.lastHeartbeat).Seconds()
+	if elapsed > 0 && c.lastHeartbeat != (time.Time{}) {
+		keyRate = float64(currentCount-c.lastKeyCount) / elapsed
+	}
+	c.lastHeartbeat = now
+	c.lastKeyCount = currentCount
+
 	hb := vkg.Heartbeat{
 		ClientID: c.clientID,
 		Hostname: c.hostname,
 		Version:  c.version,
 		Seekers:  c.seekers,
-		KeyCount: c.keyCount.Load(),
+		KeyRate:  keyRate,
+		KeyCount: currentCount,
 	}
 	b, err := json.Marshal(hb)
 	if err != nil {
