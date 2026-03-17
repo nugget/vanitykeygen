@@ -71,11 +71,11 @@ run-client: build
 clean:
     rm -rf dist
 
-version_tag := version
+default_tag := version
 
 # Build and push multi-arch container to ghcr.io
 [group('container')]
-package tag=version_tag:
+package tag=default_tag:
     #!/usr/bin/env bash
     set -euo pipefail
 
