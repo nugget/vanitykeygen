@@ -108,14 +108,7 @@ package tag=default_tag:
 # Login to GitHub Container Registry
 [group('container')]
 ghcr-login:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -f /Users/nugget/Sync/Projects/AI/Claude/identity/github_token ]; then
-        cat /Users/nugget/Sync/Projects/AI/Claude/identity/github_token | docker login ghcr.io -u {{ owner }} --password-stdin
-    else
-        echo "Run: echo \$GITHUB_TOKEN | docker login ghcr.io -u {{ owner }} --password-stdin"
-        exit 1
-    fi
+    docker login ghcr.io -u {{ owner }}
 
 # Build, push, and attach image to a GitHub release
 [group('container')]
