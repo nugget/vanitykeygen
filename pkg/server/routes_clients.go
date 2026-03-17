@@ -14,8 +14,13 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientID := req.ClientID
+	if clientID == "" {
+		clientID = vkg.NewID()
+	}
+
 	c := &vkg.ClientInfo{
-		ID:       vkg.NewID(),
+		ID:       clientID,
 		Hostname: req.Hostname,
 		Version:  req.Version,
 		Seekers:  req.Seekers,

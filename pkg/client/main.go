@@ -3,6 +3,8 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -211,8 +213,16 @@ func (c *Client) fetchTargetFull() error {
 	return nil
 }
 
+// stableID derives a deterministic client ID from the hostname so it
+// persists across restarts without needing local state files.
+func stableID(hostname string) string {
+	h := sha256.Sum256([]byte("vkg-client:" + hostname))
+	return hex.EncodeToString(h[:8])
+}
+
 func (c *Client) register() error {
 	req := vkg.RegisterRequest{
+		ClientID: stableID(c.hostname),
 		Hostname: c.hostname,
 		Version:  c.version,
 		Seekers:  c.seekers,

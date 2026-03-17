@@ -63,7 +63,9 @@ type Heartbeat struct {
 }
 
 // RegisterRequest is sent by a client on startup.
+// If ClientID is set, the server reuses it (stable across restarts).
 type RegisterRequest struct {
+	ClientID string `json:"clientId,omitempty"`
 	Hostname string `json:"hostname"`
 	Version  string `json:"version"`
 	Seekers  int    `json:"seekers"`
