@@ -93,14 +93,18 @@
               <option value="pubkey">Public key only</option>
             </select>
           </label>
-          <label id="target-case-mode-row">
-            Case Mode
-            <select id="target-case-mode">
-              <option value="insensitive">Case insensitive</option>
-              <option value="sensitive">Case sensitive</option>
-              <option value="capitalized">Capitalized</option>
-            </select>
-          </label>
+          <div id="target-case-modes-row">
+            <span class="form-label">Case Modes</span>
+            <label class="checkbox-label">
+              <input type="checkbox" id="target-cm-insensitive" checked> Case insensitive
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="target-cm-sensitive"> Case sensitive
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="target-cm-capitalized"> Capitalized
+            </label>
+          </div>
           <label class="checkbox-label">
             <input type="checkbox" id="target-active"> Active
           </label>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nugget/vanitykeygen/pkg/vkg"
@@ -18,7 +19,7 @@ CREATE TABLE IF NOT EXISTS targets (
 	pattern     TEXT NOT NULL,
 	label       TEXT NOT NULL DEFAULT '',
 	active      INTEGER NOT NULL DEFAULT 0,
-	case_mode   TEXT NOT NULL DEFAULT 'insensitive',
+	case_modes   TEXT NOT NULL DEFAULT 'insensitive',
 	match_scope TEXT NOT NULL DEFAULT 'both',
 	created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -95,6 +96,9 @@ func (s *Store) CreateTarget(ctx context.Context, t *vkg.Target) error {
 	if t.Type == "" {
 		t.Type = "regex"
 	}
+	if len(t.CaseModes) == 0 {
+		t.CaseModes = []string{"insensitive"}
+	}
 	if t.MatchScope == "" {
 		t.MatchScope = "both"
 	}
@@ -102,16 +106,17 @@ func (s *Store) CreateTarget(ctx context.Context, t *vkg.Target) error {
 		t.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO targets (id, type, pattern, label, active, case_mode, match_scope, created_at)
+		`INSERT INTO targets (id, type, pattern, label, active, case_modes, match_scope, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Type, t.Pattern, t.Label, t.Active, t.CaseMode, t.MatchScope,
+		t.ID, t.Type, t.Pattern, t.Label, t.Active,
+		strings.Join(t.CaseModes, ","), t.MatchScope,
 		t.CreatedAt.Format(time.RFC3339))
 	return err
 }
 
 func (s *Store) ListTargets(ctx context.Context) ([]vkg.Target, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, type, pattern, label, active, case_mode, match_scope, created_at
+		`SELECT id, type, pattern, label, active, case_modes, match_scope, created_at
 		 FROM targets ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -122,24 +127,25 @@ func (s *Store) ListTargets(ctx context.Context) ([]vkg.Target, error) {
 
 func (s *Store) GetTarget(ctx context.Context, id string) (*vkg.Target, error) {
 	var t vkg.Target
-	var createdAt string
+	var createdAt, caseModes string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, type, pattern, label, active, case_mode, match_scope, created_at
+		`SELECT id, type, pattern, label, active, case_modes, match_scope, created_at
 		 FROM targets WHERE id = ?`, id).
-		Scan(&t.ID, &t.Type, &t.Pattern, &t.Label, &t.Active, &t.CaseMode, &t.MatchScope, &createdAt)
+		Scan(&t.ID, &t.Type, &t.Pattern, &t.Label, &t.Active, &caseModes, &t.MatchScope, &createdAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	t.CaseModes = splitCaseModes(caseModes)
 	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	return &t, nil
 }
 
 func (s *Store) ListActiveTargets(ctx context.Context) ([]vkg.Target, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, type, pattern, label, active, case_mode, match_scope, created_at
+		`SELECT id, type, pattern, label, active, case_modes, match_scope, created_at
 		 FROM targets WHERE active = 1 ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -152,22 +158,31 @@ func scanTargets(rows *sql.Rows) ([]vkg.Target, error) {
 	var targets []vkg.Target
 	for rows.Next() {
 		var t vkg.Target
-		var createdAt string
+		var createdAt, caseModes string
 		if err := rows.Scan(&t.ID, &t.Type, &t.Pattern, &t.Label, &t.Active,
-			&t.CaseMode, &t.MatchScope, &createdAt); err != nil {
+			&caseModes, &t.MatchScope, &createdAt); err != nil {
 			return nil, err
 		}
+		t.CaseModes = splitCaseModes(caseModes)
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		targets = append(targets, t)
 	}
 	return targets, rows.Err()
 }
 
+func splitCaseModes(s string) []string {
+	if s == "" {
+		return []string{"insensitive"}
+	}
+	return strings.Split(s, ",")
+}
+
 func (s *Store) UpdateTarget(ctx context.Context, t *vkg.Target) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE targets SET type = ?, pattern = ?, label = ?, active = ?,
-		 case_mode = ?, match_scope = ? WHERE id = ?`,
-		t.Type, t.Pattern, t.Label, t.Active, t.CaseMode, t.MatchScope, t.ID)
+		 case_modes = ?, match_scope = ? WHERE id = ?`,
+		t.Type, t.Pattern, t.Label, t.Active,
+		strings.Join(t.CaseModes, ","), t.MatchScope, t.ID)
 	return err
 }
 

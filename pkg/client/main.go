@@ -389,6 +389,13 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 		},
 	}
 
+	// Lower process priority so seekers are friendlier to other processes
+	if err := setProcessNiceness(10); err != nil {
+		c.logger.Warn("failed to set process niceness", "error", err)
+	} else {
+		c.logger.Info("process niceness set", "nice", 10)
+	}
+
 	// Register with server
 	if err := c.register(); err != nil {
 		return fmt.Errorf("registration failed: %w", err)

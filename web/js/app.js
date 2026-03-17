@@ -74,8 +74,7 @@ async function refreshDashboard() {
   if (activeTargets.length) {
     atEl.innerHTML = activeTargets.map(t => {
       const typeLabel = t.type === 'word' ? 'word' : 'regex';
-      const modeMap = { insensitive: 'CI', sensitive: 'CS', capitalized: 'Cap' };
-      const csLabel = t.type === 'word' ? ` (${modeMap[t.caseMode] || 'CI'})` : '';
+      const csLabel = t.type === 'word' ? ` (${formatCaseModes(t.caseModes)})` : '';
       return `<div class="active-target-item"><span class="badge badge-${typeLabel}">${typeLabel}${csLabel}</span> <strong>${escapeHtml(t.label || t.pattern)}</strong> <code>${escapeHtml(t.pattern)}</code></div>`;
     }).join('');
   } else {
@@ -111,6 +110,12 @@ function matchTypeBadges(m) {
   return s || '-';
 }
 
+function formatCaseModes(modes) {
+  if (!modes || !modes.length) return 'CI';
+  const map = { insensitive: 'CI', sensitive: 'CS', capitalized: 'Cap' };
+  return modes.map(m => map[m] || m).join('+');
+}
+
 function scopeLabel(scope) {
   switch (scope) {
     case 'fingerprint': return 'FP';
@@ -134,8 +139,7 @@ async function refreshTargets() {
   empty.style.display = 'none';
   tbody.innerHTML = targets.map(t => {
     const typeLabel = t.type === 'word' ? 'word' : 'regex';
-    const csInfo = t.type === 'word' && t.caseMode && t.caseMode !== 'insensitive'
-      ? ` (${t.caseMode === 'capitalized' ? 'Cap' : 'CS'})` : '';
+    const csInfo = t.type === 'word' ? ' (' + formatCaseModes(t.caseModes) + ')' : '';
     return `
     <tr>
       <td>${t.active
@@ -158,13 +162,28 @@ async function refreshTargets() {
 const targetTypeEl = document.getElementById('target-type');
 const targetPatternLabel = document.getElementById('target-pattern-label');
 const targetPatternEl = document.getElementById('target-pattern');
-const targetCaseModeRow = document.getElementById('target-case-mode-row');
+const targetCaseModesRow = document.getElementById('target-case-modes-row');
 
 function updateTargetFormForType() {
   const isWord = targetTypeEl.value === 'word';
   targetPatternLabel.textContent = isWord ? 'Word' : 'Pattern (regex)';
   targetPatternEl.placeholder = isWord ? 'nugget' : '(?i)pattern$';
-  targetCaseModeRow.style.display = isWord ? '' : 'none';
+  targetCaseModesRow.style.display = isWord ? '' : 'none';
+}
+
+function getCaseModes() {
+  const modes = [];
+  if (document.getElementById('target-cm-insensitive').checked) modes.push('insensitive');
+  if (document.getElementById('target-cm-sensitive').checked) modes.push('sensitive');
+  if (document.getElementById('target-cm-capitalized').checked) modes.push('capitalized');
+  return modes.length ? modes : ['insensitive'];
+}
+
+function setCaseModes(modes) {
+  if (!modes || !modes.length) modes = ['insensitive'];
+  document.getElementById('target-cm-insensitive').checked = modes.includes('insensitive');
+  document.getElementById('target-cm-sensitive').checked = modes.includes('sensitive');
+  document.getElementById('target-cm-capitalized').checked = modes.includes('capitalized');
 }
 
 targetTypeEl.addEventListener('change', updateTargetFormForType);
@@ -176,7 +195,7 @@ document.getElementById('btn-new-target').addEventListener('click', () => {
   targetPatternEl.value = '';
   document.getElementById('target-label').value = '';
   document.getElementById('target-match-scope').value = 'both';
-  document.getElementById('target-case-mode').value = 'insensitive';
+  setCaseModes(['insensitive']);
   document.getElementById('target-active').checked = true;
   updateTargetFormForType();
   document.getElementById('target-dialog').showModal();
@@ -194,7 +213,7 @@ document.getElementById('target-form').addEventListener('submit', async (e) => {
     pattern: targetPatternEl.value,
     label: document.getElementById('target-label').value,
     matchScope: document.getElementById('target-match-scope').value,
-    caseMode: document.getElementById('target-case-mode').value,
+    caseModes: getCaseModes(),
     active: document.getElementById('target-active').checked,
   };
 
@@ -217,7 +236,7 @@ window.editTarget = async function(id) {
   targetPatternEl.value = t.pattern;
   document.getElementById('target-label').value = t.label;
   document.getElementById('target-match-scope').value = t.matchScope || 'both';
-  document.getElementById('target-case-mode').value = t.caseMode || 'insensitive';
+  setCaseModes(t.caseModes);
   document.getElementById('target-active').checked = t.active;
   updateTargetFormForType();
   document.getElementById('target-dialog').showModal();

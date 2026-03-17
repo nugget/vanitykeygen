@@ -8,7 +8,7 @@ import (
 
 // Target represents a search pattern for generated keys.
 // Type is "word" (simple word match with server-generated regex) or "regex" (raw regex).
-// CaseMode controls word matching: "insensitive", "sensitive", or "capitalized".
+// CaseModes controls word matching: any combination of "insensitive", "sensitive", "capitalized".
 // MatchScope controls what is tested: "fingerprint", "pubkey", or "both".
 type Target struct {
 	ID         string    `json:"id"`
@@ -16,7 +16,7 @@ type Target struct {
 	Pattern    string    `json:"pattern"`    // word or raw regex
 	Label      string    `json:"label"`
 	Active     bool      `json:"active"`
-	CaseMode   string    `json:"caseMode"`   // "insensitive", "sensitive", or "capitalized"
+	CaseModes  []string  `json:"caseModes"`  // any of: "insensitive", "sensitive", "capitalized"
 	MatchScope string    `json:"matchScope"` // "fingerprint", "pubkey", or "both"
 	CreatedAt  time.Time `json:"createdAt"`
 }

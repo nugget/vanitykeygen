@@ -10,16 +10,16 @@ import (
 )
 
 // compilePatterns builds the set of regex patterns that clients should test keys against.
-// Word targets are grouped by (caseMode, matchScope) into combined regexes.
+// Word targets are grouped into case-insensitive and case-sensitive regex groups.
+// A single word target can contribute to multiple groups based on its CaseModes.
 // Regex targets are passed through individually.
 func compilePatterns(targets []vkg.Target) []vkg.CompiledPattern {
-	// Group word targets by (caseMode, matchScope).
 	type wordKey struct {
-		caseMode   string
-		matchScope string
+		caseInsensitive bool
+		matchScope      string
 	}
 	wordGroups := make(map[wordKey][]string)
-	wordGroupOrder := []wordKey{} // preserve insertion order
+	wordGroupOrder := []wordKey{}
 
 	var patterns []vkg.CompiledPattern
 
@@ -27,18 +27,40 @@ func compilePatterns(targets []vkg.Target) []vkg.CompiledPattern {
 		scope := normalizeScope(t.MatchScope)
 
 		if t.Type == "word" {
-			caseMode := normalizeCaseMode(t.CaseMode)
-			k := wordKey{caseMode: caseMode, matchScope: scope}
-			if _, exists := wordGroups[k]; !exists {
-				wordGroupOrder = append(wordGroupOrder, k)
+			modes := t.CaseModes
+			if len(modes) == 0 {
+				modes = []string{"insensitive"}
 			}
-			word := t.Pattern
-			if caseMode == "capitalized" {
-				word = capitalize(word)
+
+			for _, mode := range modes {
+				var word string
+				var ci bool
+
+				switch mode {
+				case "insensitive":
+					word = t.Pattern
+					ci = true
+				case "sensitive":
+					word = t.Pattern
+					ci = false
+				case "capitalized":
+					word = capitalize(t.Pattern)
+					ci = false
+				default:
+					continue
+				}
+
+				k := wordKey{caseInsensitive: ci, matchScope: scope}
+				if _, exists := wordGroups[k]; !exists {
+					wordGroupOrder = append(wordGroupOrder, k)
+				}
+				// Avoid duplicates within the same group
+				quoted := regexp.QuoteMeta(word)
+				if !contains(wordGroups[k], quoted) {
+					wordGroups[k] = append(wordGroups[k], quoted)
+				}
 			}
-			wordGroups[k] = append(wordGroups[k], regexp.QuoteMeta(word))
 		} else {
-			// Raw regex — pass through as-is.
 			patterns = append(patterns, vkg.CompiledPattern{
 				Pattern:            t.Pattern,
 				MatchFingerprint:   scope == "fingerprint" || scope == "both",
@@ -47,15 +69,13 @@ func compilePatterns(targets []vkg.Target) []vkg.CompiledPattern {
 		}
 	}
 
-	// Build combined regex for each word group.
 	for _, k := range wordGroupOrder {
 		words := wordGroups[k]
 		alternation := strings.Join(words, "|")
 		var pattern string
-		switch k.caseMode {
-		case "insensitive":
+		if k.caseInsensitive {
 			pattern = fmt.Sprintf("(?i)%s(%s)%s", wordPrefix, alternation, wordSuffix)
-		default: // "sensitive" and "capitalized" are both case-sensitive regex
+		} else {
 			pattern = fmt.Sprintf("%s(%s)%s", wordPrefix, alternation, wordSuffix)
 		}
 		patterns = append(patterns, vkg.CompiledPattern{
@@ -77,16 +97,6 @@ func normalizeScope(scope string) string {
 	}
 }
 
-func normalizeCaseMode(mode string) string {
-	switch mode {
-	case "sensitive", "capitalized":
-		return mode
-	default:
-		return "insensitive"
-	}
-}
-
-// capitalize returns the word with the first letter uppercased and the rest lowercased.
 func capitalize(s string) string {
 	if s == "" {
 		return s
@@ -97,4 +107,13 @@ func capitalize(s string) string {
 		runes[i] = unicode.ToLower(runes[i])
 	}
 	return string(runes)
+}
+
+func contains(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

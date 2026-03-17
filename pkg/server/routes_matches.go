@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/nugget/vanitykeygen/pkg/vkg"
 )
@@ -83,61 +82,27 @@ func (s *Server) attributeMatch(r *http.Request, m *vkg.Match) string {
 	}
 
 	for _, t := range targets {
-		var pattern string
+		scope := normalizeScope(t.MatchScope)
+
 		if t.Type == "word" {
-			word := t.Pattern
-			caseMode := t.CaseMode
-			if caseMode == "" {
-				caseMode = "insensitive"
-			}
-			if caseMode == "capitalized" {
-				// Capitalize first letter, lowercase rest
-				runes := []rune(word)
-				if len(runes) > 0 {
-					runes[0] = unicode.ToUpper(runes[0])
-					for i := 1; i < len(runes); i++ {
-						runes[i] = unicode.ToLower(runes[i])
-					}
-					word = string(runes)
-				}
-			}
-			quoted := regexp.QuoteMeta(word)
-			if caseMode == "insensitive" {
-				pattern = "(?i)" + wordPrefix + quoted + wordSuffix
-			} else {
-				pattern = wordPrefix + quoted + wordSuffix
+			// Check match string directly (case-insensitive)
+			if strings.Contains(strings.ToLower(m.MatchString), strings.ToLower(t.Pattern)) {
+				return t.ID
 			}
 		} else {
-			pattern = t.Pattern
-		}
-
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			continue
-		}
-
-		scope := t.MatchScope
-		if scope == "" {
-			scope = "both"
-		}
-
-		if (scope == "fingerprint" || scope == "both") && m.MatchedFingerprint {
-			if re.MatchString(m.Key.Fingerprint) {
-				return t.ID
+			re, err := regexp.Compile(t.Pattern)
+			if err != nil {
+				continue
 			}
-		}
-		if (scope == "pubkey" || scope == "both") && m.MatchedAuthorizedKey {
-			if re.MatchString(m.Key.AuthorizedString) {
-				return t.ID
+			if (scope == "fingerprint" || scope == "both") && m.MatchedFingerprint {
+				if re.MatchString(m.Key.Fingerprint) {
+					return t.ID
+				}
 			}
-		}
-
-		// Also check match string directly for word targets
-		if t.Type == "word" {
-			matchLower := strings.ToLower(m.MatchString)
-			wordLower := strings.ToLower(t.Pattern)
-			if strings.Contains(matchLower, wordLower) {
-				return t.ID
+			if (scope == "pubkey" || scope == "both") && m.MatchedAuthorizedKey {
+				if re.MatchString(m.Key.AuthorizedString) {
+					return t.ID
+				}
 			}
 		}
 	}

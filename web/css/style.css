@@ -202,6 +202,12 @@ dialog select {
   font-size: 0.85rem;
 }
 dialog input:focus { outline: none; border-color: var(--accent); }
+.form-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
 .checkbox-label {
   display: flex !important;
   align-items: center;
