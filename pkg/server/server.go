@@ -31,7 +31,7 @@ var (
 func FlagSet() *flag.FlagSet {
 	f := flag.NewFlagSet("server", flag.ExitOnError)
 	f.IntVar(&listenPort, "p", 8080, "Listen port")
-	f.StringVar(&listenAddress, "b", "127.0.0.1", "Bind address")
+	f.StringVar(&listenAddress, "b", "0.0.0.0", "Bind address")
 	f.StringVar(&dbPath, "d", "vkg.db", "SQLite database path")
 	f.StringVar(&defaultTarget, "t", "", "Default target pattern (creates if DB is empty)")
 	f.StringVar(&wordPrefix, "word-prefix", `[\/\+]`, "Regex prefix for word targets")
