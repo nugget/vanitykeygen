@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main, overhaul]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: extractions/setup-just@v2
+
+      - name: Run CI
+        run: just ci

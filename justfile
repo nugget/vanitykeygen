@@ -56,6 +56,10 @@ test:
 vet:
     go vet ./...
 
+# CI: vet, test, and build all targets
+[group('test')]
+ci: vet test build-all
+
 # Run the server locally
 [group('run')]
 run-server: build
