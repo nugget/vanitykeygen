@@ -12,8 +12,8 @@ import (
 // MatchScope controls what is tested: "fingerprint", "pubkey", or "both".
 type Target struct {
 	ID         string    `json:"id"`
-	Type       string    `json:"type"`       // "word" or "regex"
-	Pattern    string    `json:"pattern"`    // word or raw regex
+	Type       string    `json:"type"`    // "word" or "regex"
+	Pattern    string    `json:"pattern"` // word or raw regex
 	Label      string    `json:"label"`
 	Active     bool      `json:"active"`
 	CaseModes  []string  `json:"caseModes"`  // any of: "insensitive", "sensitive", "capitalized"

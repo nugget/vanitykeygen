@@ -13,11 +13,11 @@ import (
 
 // Result holds a generated ED25519 keypair in multiple formats.
 type Result struct {
-	PublicKey        ed25519.PublicKey
-	PrivateKey       ed25519.PrivateKey
-	AuthorizedKey    string
-	Fingerprint      string
-	EncodedKey       []byte // PEM-encoded private key
+	PublicKey     ed25519.PublicKey
+	PrivateKey    ed25519.PrivateKey
+	AuthorizedKey string
+	Fingerprint   string
+	EncodedKey    []byte // PEM-encoded private key
 }
 
 // Generate creates a new random ED25519 keypair.

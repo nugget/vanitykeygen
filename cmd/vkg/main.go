@@ -50,7 +50,9 @@ func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(st
 	verbose := false
 	globalFlags := flag.NewFlagSet("vkg", flag.ContinueOnError)
 	globalFlags.BoolVar(&verbose, "v", false, "Verbose (debug) logging")
-	globalFlags.Parse(args[1:])
+	if err := globalFlags.Parse(args[1:]); err != nil {
+		return err
+	}
 
 	setupLogger(stdout, verbose)
 

@@ -325,7 +325,7 @@ func (c *Client) sendHeartbeat() error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
 }
 
@@ -357,7 +357,7 @@ func (c *Client) reportMatch(s seekerStatus) error {
 		return fmt.Errorf("post match: %w", err)
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("report match: server returned %s", resp.Status)

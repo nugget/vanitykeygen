@@ -158,8 +158,12 @@ func TestMarkOfflineClients(t *testing.T) {
 
 	old := &vkg.ClientInfo{ID: "old", Hostname: "h", Status: "active", LastSeen: time.Now().UTC().Add(-10 * time.Minute)}
 	fresh := &vkg.ClientInfo{ID: "fresh", Hostname: "h", Status: "active", LastSeen: time.Now().UTC()}
-	s.UpsertClient(ctx, old)
-	s.UpsertClient(ctx, fresh)
+	if err := s.UpsertClient(ctx, old); err != nil {
+		t.Fatalf("UpsertClient(old): %v", err)
+	}
+	if err := s.UpsertClient(ctx, fresh); err != nil {
+		t.Fatalf("UpsertClient(fresh): %v", err)
+	}
 
 	if err := s.MarkOfflineClients(ctx, 5*time.Minute); err != nil {
 		t.Fatalf("MarkOfflineClients: %v", err)

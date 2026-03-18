@@ -56,9 +56,25 @@ test:
 vet:
     go vet ./...
 
-# CI: vet, test, and build all targets
+# Check formatting
 [group('test')]
-ci: vet test build-all
+fmt-check:
+    @test -z "$(gofmt -l .)" || (echo "Files need formatting:"; gofmt -l .; exit 1)
+
+# Check go.mod is tidy
+[group('test')]
+mod-tidy-check:
+    go mod tidy
+    @git diff --exit-code go.mod go.sum || (echo "go.mod/go.sum not tidy; run 'go mod tidy'"; exit 1)
+
+# Run golangci-lint
+[group('test')]
+lint:
+    golangci-lint run ./...
+
+# CI: fmt, mod-tidy, vet, lint, test, and build all targets
+[group('test')]
+ci: fmt-check mod-tidy-check vet lint test build-all
 
 # Run the server locally
 [group('run')]
