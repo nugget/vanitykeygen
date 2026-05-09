@@ -167,7 +167,10 @@ func (c *Client) seeker(ctx context.Context, statusUpdates chan<- seekerStatus, 
 			continue
 		}
 
+		// Count once per generated key, including the key that matches.
+		// Reporting (match send or ticker tick) consumes the local count.
 		c.keyCount.Add(1)
+		keyCount++
 
 		// Test key against all compiled patterns
 		for _, cp := range compiled {
@@ -206,6 +209,7 @@ func (c *Client) seeker(ctx context.Context, statusUpdates chan<- seekerStatus, 
 			}
 		}
 
+		// Non-blocking ticker check: every 5s, report the running count.
 		select {
 		case <-ticker.C:
 			s := seekerStatus{
@@ -220,11 +224,15 @@ func (c *Client) seeker(ctx context.Context, statusUpdates chan<- seekerStatus, 
 			}
 			keyCount = 0
 		default:
-			keyCount++
 		}
 	}
 }
 
+// patternsMatch reports whether the locally compiled patterns are
+// already in sync with patterns served by the server, including the
+// scope flags. A scope-only change (same regex, different
+// match_scope) must trigger a recompile so seekers don't keep testing
+// against the stale scope.
 func patternsMatch(compiled []compiledPattern, patterns []vkg.CompiledPattern) bool {
 	if len(compiled) != len(patterns) {
 		return false
@@ -335,6 +343,9 @@ func (c *Client) sendHeartbeat() error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("heartbeat: server returned %s", resp.Status)
+	}
 	return nil
 }
 
