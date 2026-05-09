@@ -98,7 +98,7 @@ function renderRecentMatches(matches) {
   }
   empty.style.display = 'none';
   tbody.innerHTML = matches.map(m => `
-    <tr class="clickable" onclick="viewMatch('${m.id}')">
+    <tr class="clickable" data-match-id="${escapeHtml(m.id)}">
       <td>${formatTime(m.timestamp)}</td>
       <td class="mono">${escapeHtml(m.match_string)}</td>
       <td>${matchTypeBadges(m)}</td>
@@ -144,6 +144,7 @@ async function refreshTargets() {
   tbody.innerHTML = targets.map(t => {
     const typeLabel = t.type === 'word' ? 'word' : 'regex';
     const csInfo = t.type === 'word' ? ' (' + formatCaseModes(t.case_modes) + ')' : '';
+    const safeId = escapeHtml(t.id);
     return `
     <tr>
       <td>${t.active
@@ -154,8 +155,8 @@ async function refreshTargets() {
       <td class="mono">${escapeHtml(t.pattern)}</td>
       <td>${scopeLabel(t.match_scope)}</td>
       <td>
-        <button class="btn btn-sm" onclick="editTarget('${t.id}')">Edit</button>
-        <button class="btn btn-sm btn-danger" onclick="deleteTarget('${t.id}')">Delete</button>
+        <button class="btn btn-sm" data-target-id="${safeId}" data-action="edit">Edit</button>
+        <button class="btn btn-sm btn-danger" data-target-id="${safeId}" data-action="delete">Delete</button>
       </td>
     </tr>
   `;
@@ -230,8 +231,8 @@ document.getElementById('target-form').addEventListener('submit', async (e) => {
   refreshTargets();
 });
 
-window.editTarget = async function(id) {
-  const res = await api(`/api/targets/${id}`);
+async function editTarget(id) {
+  const res = await api(`/api/targets/${encodeURIComponent(id)}`);
   if (!res || !res.data) return;
   const t = res.data;
   document.getElementById('target-dialog-title').textContent = 'Edit Target';
@@ -244,13 +245,22 @@ window.editTarget = async function(id) {
   document.getElementById('target-active').checked = t.active;
   updateTargetFormForType();
   document.getElementById('target-dialog').showModal();
-};
+}
 
-window.deleteTarget = async function(id) {
+async function deleteTarget(id) {
   if (!confirm('Delete this target?')) return;
-  await api(`/api/targets/${id}`, { method: 'DELETE' });
+  await api(`/api/targets/${encodeURIComponent(id)}`, { method: 'DELETE' });
   refreshTargets();
-};
+}
+
+// Delegated listener for target row action buttons.
+document.querySelector('#targets-table tbody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-target-id]');
+  if (!btn) return;
+  const id = btn.dataset.targetId;
+  if (btn.dataset.action === 'edit') editTarget(id);
+  else if (btn.dataset.action === 'delete') deleteTarget(id);
+});
 
 // --- Matches ---
 async function refreshMatches() {
@@ -265,30 +275,34 @@ async function refreshMatches() {
     return;
   }
   empty.style.display = 'none';
-  tbody.innerHTML = matches.map(m => `
-    <tr class="clickable" onclick="viewMatch('${m.id}')">
+  tbody.innerHTML = matches.map(m => {
+    const auth = (m.key && m.key.authorized_string) || '';
+    const preview = auth.slice(0, 40) + (auth.length > 40 ? '...' : '');
+    return `
+    <tr class="clickable" data-match-id="${escapeHtml(m.id)}">
       <td>${formatTime(m.timestamp)}</td>
       <td class="mono">${escapeHtml(m.match_string)}</td>
       <td class="mono">${escapeHtml((m.key && m.key.fingerprint) || '-')}</td>
-      <td class="mono" title="${escapeHtml((m.key && m.key.authorized_string) || '')}">${escapeHtml(((m.key && m.key.authorized_string) || '').slice(0, 40))}${((m.key && m.key.authorized_string) || '').length > 40 ? '...' : ''}</td>
+      <td class="mono" title="${escapeHtml(auth)}">${escapeHtml(preview)}</td>
       <td>${escapeHtml(m.hostname || m.client_id || '-')}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function copyableBlock(label, value) {
   const id = 'copy-' + Math.random().toString(36).slice(2, 8);
   return `
-    <div class="detail-row"><span class="detail-label">${label}</span></div>
+    <div class="detail-row"><span class="detail-label">${escapeHtml(label)}</span></div>
     <div class="copyable-section">
-      <button class="btn-copy" id="${id}" onclick="copyToClipboard('${id}', this)">Copy</button>
+      <button class="btn-copy" id="${id}">Copy</button>
       <pre id="${id}-val">${escapeHtml(value || '-')}</pre>
     </div>
   `;
 }
 
-window.copyToClipboard = function(id, btn) {
-  const text = document.getElementById(id + '-val').textContent;
+function copyToClipboard(blockId, btn) {
+  const text = document.getElementById(blockId + '-val').textContent;
   navigator.clipboard.writeText(text).then(() => {
     btn.textContent = 'Copied';
     btn.classList.add('copied');
@@ -297,10 +311,10 @@ window.copyToClipboard = function(id, btn) {
       btn.classList.remove('copied');
     }, 2000);
   });
-};
+}
 
-window.viewMatch = async function(id) {
-  const res = await api(`/api/matches/${id}`);
+async function viewMatch(id) {
+  const res = await api(`/api/matches/${encodeURIComponent(id)}`);
   if (!res || !res.data) return;
   const m = res.data;
   const c = document.getElementById('match-detail-content');
@@ -314,8 +328,23 @@ window.viewMatch = async function(id) {
     ${copyableBlock('Auth Key', (m.key && m.key.authorized_string) || '')}
     ${copyableBlock('Private Key', (m.key && m.key.private_string) || '')}
   `;
+  // Delegated copy-button listener; the block IDs are local random hex.
+  c.querySelectorAll('.btn-copy').forEach(btn => {
+    btn.addEventListener('click', () => copyToClipboard(btn.id, btn));
+  });
   document.getElementById('match-detail-dialog').showModal();
-};
+}
+
+// Delegated listeners for clickable match rows.
+function bindMatchRowClicks(tbody) {
+  tbody.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-match-id]');
+    if (!tr) return;
+    viewMatch(tr.dataset.matchId);
+  });
+}
+bindMatchRowClicks(document.querySelector('#recent-matches-table tbody'));
+bindMatchRowClicks(document.querySelector('#matches-table tbody'));
 
 document.getElementById('btn-close-match-detail').addEventListener('click', () => {
   document.getElementById('match-detail-dialog').close();
