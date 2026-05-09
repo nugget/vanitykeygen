@@ -4,11 +4,6 @@ For project conventions, build commands, architecture, and contribution
 guidelines, see [AGENTS.md](AGENTS.md). Everything below is specific to
 the Claude Code operator experience on this repo.
 
-## GitHub
-
-- GitHub classic token: `/Users/nugget/Sync/Projects/AI/Claude/identity/github_token`
-- `gh` should pick this up automatically for this repo.
-
 ## CI Gate
 
 **MANDATORY: `just ci` must pass locally before every `git push`. No

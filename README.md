@@ -59,12 +59,18 @@ Updates stream in real time via Server-Sent Events.
 vkg server [options]
 
   -p int    Listen port (default 8080)
-  -b string Bind address (default "" for all)
+  -b string Bind address (default "0.0.0.0", all interfaces)
   -d string SQLite database path (default "vkg.db")
   -t string Default target pattern (seeds DB on first run)
 ```
 
-Environment variables: `VKG_DB_PATH`, `VKG_TARGET`
+Environment variables: `VKG_LISTEN_PORT`, `VKG_LISTEN_ADDRESS`,
+`VKG_DB_PATH`, `VKG_TARGET`.
+
+The default bind is `0.0.0.0` for container compatibility; the server
+logs a warning at startup whenever it binds to a non-loopback address
+because match detail responses contain private key material. Override
+with `-b 127.0.0.1` for host-only deployments.
 
 ### API
 
