@@ -4,23 +4,6 @@ For project conventions, build commands, architecture, and contribution
 guidelines, see [AGENTS.md](AGENTS.md). Everything below is specific to
 the Claude Code operator experience on this repo.
 
-## Identity
-
-This repo uses a project-specific committer identity, not the global
-Claude Code identity from `~/.claude/CLAUDE.md`.
-
-- **Name / email**: `thane-developer <thane-developer@macnugget.org>`
-- Repo-local git config: `gpg.format=ssh`, `user.signingkey` (path is
-  host-local, configure on your machine), `commit.gpgsign=true`
-
-Verify signing is active before your first commit:
-
-```bash
-git config commit.gpgsign   # should return true
-git config user.email       # should be thane-developer@macnugget.org
-git config user.signingkey  # should point at your local public key
-```
-
 ## GitHub
 
 - GitHub classic token: `/Users/nugget/Sync/Projects/AI/Claude/identity/github_token`
