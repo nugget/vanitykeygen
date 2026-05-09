@@ -70,18 +70,18 @@ Environment variables: `VKG_DB_PATH`, `VKG_TARGET`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/targets` | List all targets |
+| GET | `/api/targets` | List targets (`?limit=`) |
 | POST | `/api/targets` | Create a target |
-| GET | `/api/targets/active` | Get the active target |
+| GET | `/api/targets/active` | Get the active compiled patterns |
 | GET | `/api/targets/{id}` | Get a target |
 | PUT | `/api/targets/{id}` | Update a target |
 | DELETE | `/api/targets/{id}` | Delete a target |
-| GET | `/api/matches` | List matches (`?targetId=&limit=`) |
+| GET | `/api/matches` | List matches (`?target_id=&limit=`) |
 | GET | `/api/matches/{id}` | Get a match with full key material |
 | POST | `/api/matches` | Submit a match (used by clients) |
 | POST | `/api/clients/register` | Register a client |
 | POST | `/api/clients/heartbeat` | Client heartbeat |
-| GET | `/api/clients` | List connected clients |
+| GET | `/api/clients` | List connected clients (`?limit=`) |
 | GET | `/api/stats` | Aggregate fleet statistics |
 | GET | `/api/events` | SSE stream (match, client_update, target_update) |
 

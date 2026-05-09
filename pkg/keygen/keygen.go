@@ -1,3 +1,6 @@
+// Package keygen produces ED25519 SSH keypairs along with their
+// authorized_keys representation, OpenSSH-style PEM-encoded private key,
+// and SHA256 fingerprint.
 package keygen
 
 import (

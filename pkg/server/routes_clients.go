@@ -38,7 +38,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.logger.Info("client registered", "clientId", c.ID, "hostname", c.Hostname, "seekers", c.Seekers)
+	s.logger.Info("client registered", "client_id", c.ID, "hostname", c.Hostname, "seekers", c.Seekers)
 	s.hub.Broadcast("client_update", c)
 	s.writeJSON(w, http.StatusCreated, map[string]any{"data": vkg.RegisterResponse{ClientID: c.ID}})
 }
@@ -50,7 +50,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if hb.ClientID == "" {
-		s.writeError(w, http.StatusBadRequest, "clientId is required")
+		s.writeError(w, http.StatusBadRequest, "client_id is required")
 		return
 	}
 
@@ -83,6 +83,10 @@ func (s *Server) handleListClients(w http.ResponseWriter, r *http.Request) {
 	if clients == nil {
 		clients = []vkg.ClientInfo{}
 	}
+	limit := parseLimit(r, 100)
+	if len(clients) > limit {
+		clients = clients[:limit]
+	}
 	s.writeJSON(w, http.StatusOK, map[string]any{"data": clients})
 }
 
@@ -111,10 +115,10 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
-			"activeClients": activeClients,
-			"totalKeyRate":  totalKeyRate,
-			"totalKeyCount": totalKeyCount,
-			"totalMatches":  matchCount,
+			"active_clients":  activeClients,
+			"total_key_rate":  totalKeyRate,
+			"total_key_count": totalKeyCount,
+			"total_matches":   matchCount,
 		},
 	})
 }

@@ -66,10 +66,10 @@ async function refreshDashboard() {
 
   if (statsRes && statsRes.data) {
     const s = statsRes.data;
-    document.getElementById('stat-clients').textContent = s.activeClients;
-    document.getElementById('stat-keyrate').textContent = formatNumber(Math.round(s.totalKeyRate));
-    document.getElementById('stat-keycount').textContent = formatNumber(s.totalKeyCount);
-    document.getElementById('stat-matches').textContent = s.totalMatches;
+    document.getElementById('stat-clients').textContent = s.active_clients;
+    document.getElementById('stat-keyrate').textContent = formatNumber(Math.round(s.total_key_rate));
+    document.getElementById('stat-keycount').textContent = formatNumber(s.total_key_count);
+    document.getElementById('stat-matches').textContent = s.total_matches;
   }
 
   const atEl = document.getElementById('active-targets');
@@ -78,7 +78,7 @@ async function refreshDashboard() {
   if (activeTargets.length) {
     atEl.innerHTML = activeTargets.map(t => {
       const typeLabel = t.type === 'word' ? 'word' : 'regex';
-      const csLabel = t.type === 'word' ? ` (${formatCaseModes(t.caseModes)})` : '';
+      const csLabel = t.type === 'word' ? ` (${formatCaseModes(t.case_modes)})` : '';
       return `<div class="active-target-item"><span class="badge badge-${typeLabel}">${typeLabel}${csLabel}</span> <strong>${escapeHtml(t.label || t.pattern)}</strong> <code>${escapeHtml(t.pattern)}</code></div>`;
     }).join('');
   } else {
@@ -100,17 +100,17 @@ function renderRecentMatches(matches) {
   tbody.innerHTML = matches.map(m => `
     <tr class="clickable" onclick="viewMatch('${m.id}')">
       <td>${formatTime(m.timestamp)}</td>
-      <td class="mono">${escapeHtml(m.matchString)}</td>
+      <td class="mono">${escapeHtml(m.match_string)}</td>
       <td>${matchTypeBadges(m)}</td>
-      <td>${escapeHtml(m.hostname || m.clientId || '-')}</td>
+      <td>${escapeHtml(m.hostname || m.client_id || '-')}</td>
     </tr>
   `).join('');
 }
 
 function matchTypeBadges(m) {
   let s = '';
-  if (m.matchedFingerprint) s += '<span class="badge badge-fp">FP</span> ';
-  if (m.matchedAuthorizedKey) s += '<span class="badge badge-auth">Auth</span>';
+  if (m.matched_fingerprint) s += '<span class="badge badge-fp">FP</span> ';
+  if (m.matched_authorized_key) s += '<span class="badge badge-auth">Auth</span>';
   return s || '-';
 }
 
@@ -143,7 +143,7 @@ async function refreshTargets() {
   empty.style.display = 'none';
   tbody.innerHTML = targets.map(t => {
     const typeLabel = t.type === 'word' ? 'word' : 'regex';
-    const csInfo = t.type === 'word' ? ' (' + formatCaseModes(t.caseModes) + ')' : '';
+    const csInfo = t.type === 'word' ? ' (' + formatCaseModes(t.case_modes) + ')' : '';
     return `
     <tr>
       <td>${t.active
@@ -152,7 +152,7 @@ async function refreshTargets() {
       <td><span class="badge badge-${typeLabel}">${typeLabel}${csInfo}</span></td>
       <td>${escapeHtml(t.label || '-')}</td>
       <td class="mono">${escapeHtml(t.pattern)}</td>
-      <td>${scopeLabel(t.matchScope)}</td>
+      <td>${scopeLabel(t.match_scope)}</td>
       <td>
         <button class="btn btn-sm" onclick="editTarget('${t.id}')">Edit</button>
         <button class="btn btn-sm btn-danger" onclick="deleteTarget('${t.id}')">Delete</button>
@@ -216,8 +216,8 @@ document.getElementById('target-form').addEventListener('submit', async (e) => {
     type: targetTypeEl.value,
     pattern: targetPatternEl.value,
     label: document.getElementById('target-label').value,
-    matchScope: document.getElementById('target-match-scope').value,
-    caseModes: getCaseModes(),
+    match_scope: document.getElementById('target-match-scope').value,
+    case_modes: getCaseModes(),
     active: document.getElementById('target-active').checked,
   };
 
@@ -239,8 +239,8 @@ window.editTarget = async function(id) {
   targetTypeEl.value = t.type || 'regex';
   targetPatternEl.value = t.pattern;
   document.getElementById('target-label').value = t.label;
-  document.getElementById('target-match-scope').value = t.matchScope || 'both';
-  setCaseModes(t.caseModes);
+  document.getElementById('target-match-scope').value = t.match_scope || 'both';
+  setCaseModes(t.case_modes);
   document.getElementById('target-active').checked = t.active;
   updateTargetFormForType();
   document.getElementById('target-dialog').showModal();
@@ -268,10 +268,10 @@ async function refreshMatches() {
   tbody.innerHTML = matches.map(m => `
     <tr class="clickable" onclick="viewMatch('${m.id}')">
       <td>${formatTime(m.timestamp)}</td>
-      <td class="mono">${escapeHtml(m.matchString)}</td>
+      <td class="mono">${escapeHtml(m.match_string)}</td>
       <td class="mono">${escapeHtml((m.key && m.key.fingerprint) || '-')}</td>
-      <td class="mono" title="${escapeHtml((m.key && m.key.authorizedString) || '')}">${escapeHtml(((m.key && m.key.authorizedString) || '').slice(0, 40))}${((m.key && m.key.authorizedString) || '').length > 40 ? '...' : ''}</td>
-      <td>${escapeHtml(m.hostname || m.clientId || '-')}</td>
+      <td class="mono" title="${escapeHtml((m.key && m.key.authorized_string) || '')}">${escapeHtml(((m.key && m.key.authorized_string) || '').slice(0, 40))}${((m.key && m.key.authorized_string) || '').length > 40 ? '...' : ''}</td>
+      <td>${escapeHtml(m.hostname || m.client_id || '-')}</td>
     </tr>
   `).join('');
 }
@@ -307,12 +307,12 @@ window.viewMatch = async function(id) {
   c.innerHTML = `
     <div class="detail-row"><span class="detail-label">ID</span><span class="mono">${escapeHtml(m.id)}</span></div>
     <div class="detail-row"><span class="detail-label">Time</span><span>${new Date(m.timestamp).toLocaleString()}</span></div>
-    <div class="detail-row"><span class="detail-label">Match</span><span class="mono">${escapeHtml(m.matchString)}</span></div>
+    <div class="detail-row"><span class="detail-label">Match</span><span class="mono">${escapeHtml(m.match_string)}</span></div>
     <div class="detail-row"><span class="detail-label">Type</span><span>${matchTypeBadges(m)}</span></div>
-    <div class="detail-row"><span class="detail-label">Client</span><span>${escapeHtml(m.hostname || '-')} (${escapeHtml(m.clientId || '-')})</span></div>
+    <div class="detail-row"><span class="detail-label">Client</span><span>${escapeHtml(m.hostname || '-')} (${escapeHtml(m.client_id || '-')})</span></div>
     <div class="detail-row"><span class="detail-label">Fingerprint</span><span class="mono">${escapeHtml((m.key && m.key.fingerprint) || '-')}</span></div>
-    ${copyableBlock('Auth Key', (m.key && m.key.authorizedString) || '')}
-    ${copyableBlock('Private Key', (m.key && m.key.privateString) || '')}
+    ${copyableBlock('Auth Key', (m.key && m.key.authorized_string) || '')}
+    ${copyableBlock('Private Key', (m.key && m.key.private_string) || '')}
   `;
   document.getElementById('match-detail-dialog').showModal();
 };
@@ -343,9 +343,9 @@ async function refreshFleet() {
         <td>${escapeHtml(c.hostname)}</td>
         <td class="mono">${escapeHtml(c.id)}</td>
         <td>${c.seekers}</td>
-        <td class="mono">${formatNumber(Math.round(c.keyRate))}/s</td>
-        <td class="mono">${formatNumber(c.keyCount)}</td>
-        <td>${formatTime(c.lastSeen)}</td>
+        <td class="mono">${formatNumber(Math.round(c.key_rate))}/s</td>
+        <td class="mono">${formatNumber(c.key_count)}</td>
+        <td>${formatTime(c.last_seen)}</td>
       </tr>
     `;
   }).join('');

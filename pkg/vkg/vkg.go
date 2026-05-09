@@ -1,3 +1,6 @@
+// Package vkg defines the cross-package data types shared by the VKG
+// server and client: targets, matches, key material, client registration,
+// and heartbeats. All JSON-facing structs use snake_case field names.
 package vkg
 
 import (
@@ -16,39 +19,39 @@ type Target struct {
 	Pattern    string    `json:"pattern"` // word or raw regex
 	Label      string    `json:"label"`
 	Active     bool      `json:"active"`
-	CaseModes  []string  `json:"caseModes"`  // any of: "insensitive", "sensitive", "capitalized"
-	MatchScope string    `json:"matchScope"` // "fingerprint", "pubkey", or "both"
-	CreatedAt  time.Time `json:"createdAt"`
+	CaseModes  []string  `json:"case_modes"`  // any of: "insensitive", "sensitive", "capitalized"
+	MatchScope string    `json:"match_scope"` // "fingerprint", "pubkey", or "both"
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // CompiledPattern is a regex pattern sent to clients for key testing.
 type CompiledPattern struct {
 	Pattern            string `json:"pattern"`
-	MatchFingerprint   bool   `json:"matchFingerprint"`
-	MatchAuthorizedKey bool   `json:"matchAuthorizedKey"`
+	MatchFingerprint   bool   `json:"match_fingerprint"`
+	MatchAuthorizedKey bool   `json:"match_authorized_key"`
 }
 
 // Key holds the cryptographic material for a generated SSH key.
 type Key struct {
-	PrivateKey       []byte `json:"privateKey"`
-	PublicKey        []byte `json:"publicKey"`
-	EncodedKey       []byte `json:"encodedKey"`
-	PrivateString    string `json:"privateString"`
-	AuthorizedString string `json:"authorizedString"`
+	PrivateKey       []byte `json:"private_key"`
+	PublicKey        []byte `json:"public_key"`
+	EncodedKey       []byte `json:"encoded_key"`
+	PrivateString    string `json:"private_string"`
+	AuthorizedString string `json:"authorized_string"`
 	Fingerprint      string `json:"fingerprint"`
 }
 
 // Match records a successful key match against a target pattern.
 type Match struct {
 	ID                   string    `json:"id"`
-	TargetID             string    `json:"targetId"`
-	ClientID             string    `json:"clientId"`
+	TargetID             string    `json:"target_id"`
+	ClientID             string    `json:"client_id"`
 	Timestamp            time.Time `json:"timestamp"`
 	Hostname             string    `json:"hostname"`
-	SeekerID             int       `json:"seekerID"`
-	MatchString          string    `json:"matchString"`
-	MatchedAuthorizedKey bool      `json:"matchedAuthorizedKey"`
-	MatchedFingerprint   bool      `json:"matchedFingerprint"`
+	SeekerID             int       `json:"seeker_id"`
+	MatchString          string    `json:"match_string"`
+	MatchedAuthorizedKey bool      `json:"matched_authorized_key"`
+	MatchedFingerprint   bool      `json:"matched_fingerprint"`
 	Key                  Key       `json:"key"`
 }
 
@@ -58,26 +61,26 @@ type ClientInfo struct {
 	Hostname string    `json:"hostname"`
 	Version  string    `json:"version"`
 	Seekers  int       `json:"seekers"`
-	KeyRate  float64   `json:"keyRate"`
-	KeyCount int64     `json:"keyCount"`
-	LastSeen time.Time `json:"lastSeen"`
+	KeyRate  float64   `json:"key_rate"`
+	KeyCount int64     `json:"key_count"`
+	LastSeen time.Time `json:"last_seen"`
 	Status   string    `json:"status"` // "active", "idle", "offline"
 }
 
 // Heartbeat is sent periodically by clients to report status.
 type Heartbeat struct {
-	ClientID string  `json:"clientId"`
+	ClientID string  `json:"client_id"`
 	Hostname string  `json:"hostname"`
 	Version  string  `json:"version"`
 	Seekers  int     `json:"seekers"`
-	KeyRate  float64 `json:"keyRate"`
-	KeyCount int64   `json:"keyCount"`
+	KeyRate  float64 `json:"key_rate"`
+	KeyCount int64   `json:"key_count"`
 }
 
 // RegisterRequest is sent by a client on startup.
 // If ClientID is set, the server reuses it (stable across restarts).
 type RegisterRequest struct {
-	ClientID string `json:"clientId,omitempty"`
+	ClientID string `json:"client_id,omitempty"`
 	Hostname string `json:"hostname"`
 	Version  string `json:"version"`
 	Seekers  int    `json:"seekers"`
@@ -85,7 +88,7 @@ type RegisterRequest struct {
 
 // RegisterResponse is returned after client registration.
 type RegisterResponse struct {
-	ClientID string `json:"clientId"`
+	ClientID string `json:"client_id"`
 }
 
 // NewID generates a random 16-character hex ID.

@@ -3,20 +3,14 @@ package server
 import (
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/nugget/vanitykeygen/pkg/vkg"
 )
 
 func (s *Server) handleListMatches(w http.ResponseWriter, r *http.Request) {
-	targetID := r.URL.Query().Get("targetId")
-	limit := 100
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-		}
-	}
+	targetID := r.URL.Query().Get("target_id")
+	limit := parseLimit(r, 100)
 
 	matches, err := s.store.ListMatches(r.Context(), targetID, limit)
 	if err != nil {
@@ -52,10 +46,10 @@ func (s *Server) handlePostMatch(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Info("match received",
 		"hostname", m.Hostname,
-		"clientId", m.ClientID,
+		"client_id", m.ClientID,
 		"fingerprint", m.Key.Fingerprint,
-		"authorizedKey", m.Key.AuthorizedString,
-		"matchString", m.MatchString,
+		"authorized_key", m.Key.AuthorizedString,
+		"match_string", m.MatchString,
 	)
 
 	// Attribute match to a specific target if not already set.

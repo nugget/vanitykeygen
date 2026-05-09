@@ -73,7 +73,7 @@ func run(ctx context.Context, stdout io.Writer, stderr io.Writer, getenv func(st
 	case "client":
 		return client.Run(ctx, logger, stdout, stderr, getenv, cmdArgs)
 	case "version":
-		fmt.Fprintf(stdout, "vkg %s\n", gitVersion)
+		_, _ = fmt.Fprintf(stdout, "vkg %s\n", gitVersion)
 		return nil
 	default:
 		usage()

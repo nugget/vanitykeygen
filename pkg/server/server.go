@@ -1,3 +1,7 @@
+// Package server implements the VKG control plane: a REST API for
+// managing targets, recording matches, and tracking the connected
+// client fleet, plus an SSE event hub that streams live updates to the
+// embedded web dashboard.
 package server
 
 import (
@@ -28,6 +32,9 @@ var (
 	wordSuffix    string
 )
 
+// FlagSet returns the flag set understood by the server subcommand.
+// Callers register the flags via Run; this is exposed so the top-level
+// `vkg` binary can render `--help` output for both subcommands.
 func FlagSet() *flag.FlagSet {
 	f := flag.NewFlagSet("server", flag.ExitOnError)
 	f.IntVar(&listenPort, "p", 8080, "Listen port")
@@ -110,13 +117,27 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
 
 // readJSON decodes a JSON request body into v.
 func (s *Server) readJSON(r *http.Request, v any) error {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
 // writeError writes a JSON error response.
 func (s *Server) writeError(w http.ResponseWriter, status int, msg string) {
 	s.writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// parseLimit reads the ?limit= query parameter, returning fallback if
+// the parameter is absent, non-numeric, or non-positive.
+func parseLimit(r *http.Request, fallback int) int {
+	v := r.URL.Query().Get("limit")
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
 
 // Run starts the server. It blocks until interrupted or a fatal error occurs.
@@ -145,7 +166,11 @@ func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
+	defer func() {
+		if err := st.Close(); err != nil {
+			l.Warn("store close failed", "error", err)
+		}
+	}()
 
 	l.Info("vkg server starting", "version", Version, "db", dbPath, "listen", fmt.Sprintf("%s:%d", listenAddress, listenPort))
 

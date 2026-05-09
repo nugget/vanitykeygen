@@ -42,6 +42,10 @@ func (s *Server) handleListTargets(w http.ResponseWriter, r *http.Request) {
 	if targets == nil {
 		targets = []vkg.Target{}
 	}
+	limit := parseLimit(r, 100)
+	if len(targets) > limit {
+		targets = targets[:limit]
+	}
 	s.writeJSON(w, http.StatusOK, map[string]any{"data": targets})
 }
 
@@ -165,7 +169,7 @@ func (s *Server) handleDeleteTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if matchesDeleted > 0 {
-		s.logger.Info("cascade deleted matches with target", "targetId", id, "matchesDeleted", matchesDeleted)
+		s.logger.Info("cascade deleted matches with target", "target_id", id, "matches_deleted", matchesDeleted)
 	}
 	s.hub.Broadcast("target_update", map[string]string{"deleted": id})
 	w.WriteHeader(http.StatusNoContent)

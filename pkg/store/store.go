@@ -1,3 +1,6 @@
+// Package store provides SQLite-backed persistence for VKG targets,
+// matches, and connected clients. It is the only package that issues
+// SQL — all other packages call Store methods.
 package store
 
 import (
@@ -72,23 +75,27 @@ func New(dbPath string) (*Store, error) {
 		"PRAGMA busy_timeout=5000",
 	} {
 		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("pragma %s: %w", pragma, err)
 		}
 	}
 	if _, err := db.Exec(schema); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return &Store{db: db}, nil
 }
 
+// Close closes the underlying database handle.
 func (s *Store) Close() error {
 	return s.db.Close()
 }
 
 // --- Targets ---
 
+// CreateTarget inserts a new target. If t.ID is empty a fresh ID is
+// generated and assigned to t. Defaults are applied for Type, CaseModes,
+// MatchScope, and CreatedAt when not set.
 func (s *Store) CreateTarget(ctx context.Context, t *vkg.Target) error {
 	if t.ID == "" {
 		id, err := vkg.NewID()
@@ -118,6 +125,8 @@ func (s *Store) CreateTarget(ctx context.Context, t *vkg.Target) error {
 	return err
 }
 
+// ListTargets returns every target ordered by creation time (newest
+// first).
 func (s *Store) ListTargets(ctx context.Context) ([]vkg.Target, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, type, pattern, label, active, case_modes, match_scope, created_at
@@ -125,10 +134,12 @@ func (s *Store) ListTargets(ctx context.Context) ([]vkg.Target, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanTargets(rows)
 }
 
+// GetTarget loads a single target by ID. It returns (nil, nil) when no
+// target with the given ID exists.
 func (s *Store) GetTarget(ctx context.Context, id string) (*vkg.Target, error) {
 	var t vkg.Target
 	var createdAt, caseModes string
@@ -147,6 +158,8 @@ func (s *Store) GetTarget(ctx context.Context, id string) (*vkg.Target, error) {
 	return &t, nil
 }
 
+// ListActiveTargets returns every target where Active is true, ordered
+// by creation time (newest first).
 func (s *Store) ListActiveTargets(ctx context.Context) ([]vkg.Target, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, type, pattern, label, active, case_modes, match_scope, created_at
@@ -154,7 +167,7 @@ func (s *Store) ListActiveTargets(ctx context.Context) ([]vkg.Target, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanTargets(rows)
 }
 
@@ -181,6 +194,8 @@ func splitCaseModes(s string) []string {
 	return strings.Split(s, ",")
 }
 
+// UpdateTarget overwrites all mutable fields of the target identified
+// by t.ID. CreatedAt is not updated.
 func (s *Store) UpdateTarget(ctx context.Context, t *vkg.Target) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE targets SET type = ?, pattern = ?, label = ?, active = ?,
@@ -190,6 +205,8 @@ func (s *Store) UpdateTarget(ctx context.Context, t *vkg.Target) error {
 	return err
 }
 
+// DeleteTarget removes a target and cascades deletion of all matches
+// attributed to it. The returned count is the number of matches deleted.
 func (s *Store) DeleteTarget(ctx context.Context, id string) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM matches WHERE target_id = ?`, id)
 	if err != nil {
@@ -202,6 +219,8 @@ func (s *Store) DeleteTarget(ctx context.Context, id string) (int64, error) {
 
 // --- Matches ---
 
+// RecordMatch persists a match, generating an ID and timestamp if they
+// are not already set.
 func (s *Store) RecordMatch(ctx context.Context, m *vkg.Match) error {
 	if m.ID == "" {
 		id, err := vkg.NewID()
@@ -226,6 +245,9 @@ func (s *Store) RecordMatch(ctx context.Context, m *vkg.Match) error {
 	return err
 }
 
+// ListMatches returns matches ordered by timestamp (newest first),
+// optionally filtered by targetID. A non-positive limit is clamped to
+// the default of 100.
 func (s *Store) ListMatches(ctx context.Context, targetID string, limit int) ([]vkg.Match, error) {
 	var rows *sql.Rows
 	var err error
@@ -248,10 +270,13 @@ func (s *Store) ListMatches(ctx context.Context, targetID string, limit int) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanMatches(rows)
 }
 
+// GetMatch loads a single match by ID, including its private key
+// material. It returns (nil, nil) when no match with the given ID
+// exists.
 func (s *Store) GetMatch(ctx context.Context, id string) (*vkg.Match, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, target_id, client_id, timestamp, hostname, seeker_id,
@@ -261,7 +286,7 @@ func (s *Store) GetMatch(ctx context.Context, id string) (*vkg.Match, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	matches, err := scanMatches(rows)
 	if err != nil {
 		return nil, err
@@ -293,6 +318,9 @@ func scanMatches(rows *sql.Rows) ([]vkg.Match, error) {
 
 // --- Clients ---
 
+// UpsertClient inserts a new client row or updates the existing row
+// keyed on c.ID. An empty ID generates a fresh ID; a zero LastSeen is
+// set to the current time.
 func (s *Store) UpsertClient(ctx context.Context, c *vkg.ClientInfo) error {
 	if c.ID == "" {
 		id, err := vkg.NewID()
@@ -320,6 +348,8 @@ func (s *Store) UpsertClient(ctx context.Context, c *vkg.ClientInfo) error {
 	return err
 }
 
+// ListClients returns every known client ordered by last-seen time
+// (newest first).
 func (s *Store) ListClients(ctx context.Context) ([]vkg.ClientInfo, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, hostname, version, seekers, key_rate, key_count, last_seen, status
@@ -327,7 +357,7 @@ func (s *Store) ListClients(ctx context.Context) ([]vkg.ClientInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var clients []vkg.ClientInfo
 	for rows.Next() {
@@ -342,6 +372,8 @@ func (s *Store) ListClients(ctx context.Context) ([]vkg.ClientInfo, error) {
 	return clients, rows.Err()
 }
 
+// MarkOfflineClients sets status = "offline" for every client whose
+// last_seen is older than threshold and is not already offline.
 func (s *Store) MarkOfflineClients(ctx context.Context, threshold time.Duration) error {
 	cutoff := time.Now().UTC().Add(-threshold).Format(time.RFC3339)
 	_, err := s.db.ExecContext(ctx,
@@ -349,6 +381,8 @@ func (s *Store) MarkOfflineClients(ctx context.Context, threshold time.Duration)
 	return err
 }
 
+// DeleteOfflineClients removes clients that have been offline for
+// longer than threshold.
 func (s *Store) DeleteOfflineClients(ctx context.Context, threshold time.Duration) error {
 	cutoff := time.Now().UTC().Add(-threshold).Format(time.RFC3339)
 	_, err := s.db.ExecContext(ctx,

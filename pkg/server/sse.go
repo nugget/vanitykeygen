@@ -15,12 +15,17 @@ type Hub struct {
 	closed  bool
 }
 
+// NewHub returns an empty Hub ready to accept subscribers.
 func NewHub() *Hub {
 	return &Hub{
 		clients: make(map[chan []byte]struct{}),
 	}
 }
 
+// Subscribe registers a new SSE subscriber and returns its receive
+// channel along with an unsubscribe function. If the hub is already
+// closed, the returned channel is closed immediately and unsubscribe is
+// a no-op.
 func (h *Hub) Subscribe() (chan []byte, func()) {
 	ch := make(chan []byte, 64)
 	h.mu.Lock()
@@ -87,7 +92,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	// Send initial comment so the browser fires onopen immediately
-	fmt.Fprintf(w, ": connected\n\n")
+	if _, err := fmt.Fprintf(w, ": connected\n\n"); err != nil {
+		return
+	}
 	flusher.Flush()
 
 	ch, unsubscribe := s.hub.Subscribe()

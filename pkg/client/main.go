@@ -1,3 +1,7 @@
+// Package client implements the VKG seeker client: it registers with a
+// server, polls for the active compiled patterns, runs a pool of seeker
+// goroutines that generate ED25519 keys and test them against the
+// patterns, and reports any matches back to the server.
 package client
 
 import (
@@ -32,6 +36,9 @@ var (
 	numSeekers int
 )
 
+// FlagSet returns the flag set understood by the client subcommand.
+// Callers register the flags via Run; this is exposed so the top-level
+// `vkg` binary can render `--help` output for both subcommands.
 func FlagSet() *flag.FlagSet {
 	f := flag.NewFlagSet("client", flag.ExitOnError)
 	f.StringVar(&serverURI, "s", "https://vkg", "VKG server URI")
@@ -65,13 +72,15 @@ type seekerStatus struct {
 	key                  keygen.Result
 }
 
+// LogValue implements slog.LogValuer so a seekerStatus renders as a
+// structured group when included in a log call.
 func (s seekerStatus) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.Time("timestamp", s.timestamp),
 		slog.Int("sid", s.sid),
-		slog.Int("keyCount", s.keyCount),
-		slog.Bool("matchedAuthorizedKey", s.matchedAuthorizedKey),
-		slog.Bool("matchedFingerprint", s.matchedFingerprint),
+		slog.Int("key_count", s.keyCount),
+		slog.Bool("matched_authorized_key", s.matchedAuthorizedKey),
+		slog.Bool("matched_fingerprint", s.matchedFingerprint),
 		slog.String("fingerprint", s.key.Fingerprint),
 		slog.String("auth", s.key.AuthorizedKey),
 	)
@@ -236,7 +245,7 @@ func (c *Client) fetchTargets() error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("fetch targets: server returned %s", resp.Status)
@@ -277,7 +286,7 @@ func (c *Client) register() error {
 	if err != nil {
 		return fmt.Errorf("register: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("register: server returned %s", resp.Status)
@@ -291,7 +300,7 @@ func (c *Client) register() error {
 	}
 
 	c.clientID = result.Data.ClientID
-	c.logger.Info("registered with server", "clientId", c.clientID)
+	c.logger.Info("registered with server", "client_id", c.clientID)
 	return nil
 }
 
@@ -324,7 +333,7 @@ func (c *Client) sendHeartbeat() error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
 }
@@ -356,7 +365,7 @@ func (c *Client) reportMatch(s seekerStatus) error {
 	if err != nil {
 		return fmt.Errorf("post match: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -454,7 +463,7 @@ loop:
 				"duration", time.Since(stats.launchStartTime),
 				"keys", stats.keyCount,
 				"hits", stats.hitCount,
-				"hitRate", hitRate,
+				"hit_rate", hitRate,
 			)
 		case s := <-statusUpdates:
 			stats.keyCount += s.keyCount
