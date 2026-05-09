@@ -55,6 +55,38 @@ type Match struct {
 	Key                  Key       `json:"key"`
 }
 
+// MatchSummary is the public-safe view of a Match used for SSE
+// broadcasts and any other context where the full Key payload must
+// not leave the server. The fingerprint is included because it is
+// the public identifier shown to operators; private key material is
+// only ever returned via the authenticated GET /api/matches/{id}.
+type MatchSummary struct {
+	ID                   string    `json:"id"`
+	TargetID             string    `json:"target_id"`
+	ClientID             string    `json:"client_id"`
+	Timestamp            time.Time `json:"timestamp"`
+	Hostname             string    `json:"hostname"`
+	MatchString          string    `json:"match_string"`
+	MatchedAuthorizedKey bool      `json:"matched_authorized_key"`
+	MatchedFingerprint   bool      `json:"matched_fingerprint"`
+	Fingerprint          string    `json:"fingerprint"`
+}
+
+// Summary returns the public-safe projection of a Match.
+func (m Match) Summary() MatchSummary {
+	return MatchSummary{
+		ID:                   m.ID,
+		TargetID:             m.TargetID,
+		ClientID:             m.ClientID,
+		Timestamp:            m.Timestamp,
+		Hostname:             m.Hostname,
+		MatchString:          m.MatchString,
+		MatchedAuthorizedKey: m.MatchedAuthorizedKey,
+		MatchedFingerprint:   m.MatchedFingerprint,
+		Fingerprint:          m.Key.Fingerprint,
+	}
+}
+
 // ClientInfo describes a connected client in the fleet.
 type ClientInfo struct {
 	ID       string    `json:"id"`

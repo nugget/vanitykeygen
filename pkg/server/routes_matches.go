@@ -2,8 +2,8 @@ package server
 
 import (
 	"net/http"
-	"regexp"
 	"strings"
+	"time"
 
 	"github.com/nugget/vanitykeygen/pkg/vkg"
 )
@@ -44,6 +44,13 @@ func (s *Server) handlePostMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Server owns ID, Timestamp, and TargetID. Clear any client-supplied
+	// values so the store generates a fresh ID and the server attributes
+	// the match below.
+	m.ID = ""
+	m.Timestamp = time.Time{}
+	m.TargetID = ""
+
 	s.logger.Info("match received",
 		"hostname", m.Hostname,
 		"client_id", m.ClientID,
@@ -52,11 +59,8 @@ func (s *Server) handlePostMatch(w http.ResponseWriter, r *http.Request) {
 		"match_string", m.MatchString,
 	)
 
-	// Attribute match to a specific target if not already set.
-	if m.TargetID == "" {
-		if tid := s.attributeMatch(r, &m); tid != "" {
-			m.TargetID = tid
-		}
+	if tid := s.attributeMatch(r, &m); tid != "" {
+		m.TargetID = tid
 	}
 
 	if err := s.store.RecordMatch(r.Context(), &m); err != nil {
@@ -64,7 +68,8 @@ func (s *Server) handlePostMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.hub.Broadcast("match", m)
+	// SSE broadcast must not include private key material.
+	s.hub.Broadcast("match", m.Summary())
 	s.writeJSON(w, http.StatusCreated, map[string]any{"data": m})
 }
 
@@ -114,7 +119,7 @@ func (s *Server) attributeMatch(r *http.Request, m *vkg.Match) string {
 				}
 			}
 		} else {
-			re, err := regexp.Compile(t.Pattern)
+			re, err := s.cachedCompile(t.Pattern)
 			if err != nil {
 				continue
 			}

@@ -15,7 +15,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nugget/vanitykeygen/pkg/store"
@@ -51,9 +53,10 @@ var Version = "dev"
 
 // Server is the VKG server.
 type Server struct {
-	logger *slog.Logger
-	store  *store.Store
-	hub    *Hub
+	logger  *slog.Logger
+	store   *store.Store
+	hub     *Hub
+	reCache sync.Map // map[string]*regexp.Regexp — compiled attribution patterns
 }
 
 func newServer(logger *slog.Logger, st *store.Store) *Server {
@@ -124,6 +127,21 @@ func (s *Server) readJSON(r *http.Request, v any) error {
 // writeError writes a JSON error response.
 func (s *Server) writeError(w http.ResponseWriter, status int, msg string) {
 	s.writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// cachedCompile returns a compiled regex for pattern, caching the
+// result so repeated attribution lookups don't recompile. Compiled
+// *regexp.Regexp values are safe for concurrent use.
+func (s *Server) cachedCompile(pattern string) (*regexp.Regexp, error) {
+	if v, ok := s.reCache.Load(pattern); ok {
+		return v.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := s.reCache.LoadOrStore(pattern, re)
+	return actual.(*regexp.Regexp), nil
 }
 
 // parseLimit reads the ?limit= query parameter, returning fallback if

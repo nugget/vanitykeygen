@@ -63,10 +63,18 @@ type Store struct {
 }
 
 // New opens (or creates) a SQLite database and runs migrations.
+//
+// In-memory paths (":memory:" or "file::memory:...") are pinned to a
+// single connection because each new database/sql connection to an
+// in-memory database opens its own empty database, which would lose
+// the schema and any data written through other connections.
 func New(dbPath string) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
+	}
+	if isInMemoryDSN(dbPath) {
+		db.SetMaxOpenConns(1)
 	}
 	// SQLite performance pragmas
 	for _, pragma := range []string{
@@ -84,6 +92,10 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return &Store{db: db}, nil
+}
+
+func isInMemoryDSN(dsn string) bool {
+	return dsn == ":memory:" || strings.Contains(dsn, ":memory:")
 }
 
 // Close closes the underlying database handle.
@@ -206,15 +218,35 @@ func (s *Store) UpdateTarget(ctx context.Context, t *vkg.Target) error {
 }
 
 // DeleteTarget removes a target and cascades deletion of all matches
-// attributed to it. The returned count is the number of matches deleted.
-func (s *Store) DeleteTarget(ctx context.Context, id string) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM matches WHERE target_id = ?`, id)
+// attributed to it, atomically. It returns (matchesDeleted,
+// targetDeleted, error); targetDeleted is false when no row matched
+// the given id, which the caller should surface as a 404.
+func (s *Store) DeleteTarget(ctx context.Context, id string) (matchesDeleted int64, targetDeleted bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	deleted, _ := res.RowsAffected()
-	_, err = s.db.ExecContext(ctx, `DELETE FROM targets WHERE id = ?`, id)
-	return deleted, err
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM matches WHERE target_id = ?`, id)
+	if err != nil {
+		return 0, false, err
+	}
+	matchesDeleted, _ = res.RowsAffected()
+
+	res, err = tx.ExecContext(ctx, `DELETE FROM targets WHERE id = ?`, id)
+	if err != nil {
+		return 0, false, err
+	}
+	tgtRows, _ := res.RowsAffected()
+	if err = tx.Commit(); err != nil {
+		return 0, false, err
+	}
+	return matchesDeleted, tgtRows > 0, nil
 }
 
 // --- Matches ---

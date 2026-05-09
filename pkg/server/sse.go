@@ -88,7 +88,8 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// Same-origin only: omit Access-Control-Allow-Origin so cross-origin
+	// pages can't open an EventSource and read match events.
 	w.WriteHeader(http.StatusOK)
 
 	// Send initial comment so the browser fires onopen immediately

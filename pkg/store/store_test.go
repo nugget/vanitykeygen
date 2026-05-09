@@ -71,12 +71,23 @@ func TestTargetCRUD(t *testing.T) {
 	}
 
 	// Delete
-	if _, err := s.DeleteTarget(ctx, tgt.ID); err != nil {
+	_, deleted, err := s.DeleteTarget(ctx, tgt.ID)
+	if err != nil {
 		t.Fatalf("DeleteTarget: %v", err)
+	}
+	if !deleted {
+		t.Fatal("expected DeleteTarget to report the target was deleted")
 	}
 	got, _ = s.GetTarget(ctx, tgt.ID)
 	if got != nil {
 		t.Error("expected nil after delete")
+	}
+
+	// Deleting a non-existent target should report not deleted, no error.
+	if _, deleted, err := s.DeleteTarget(ctx, "nonexistent"); err != nil {
+		t.Fatalf("DeleteTarget(missing): %v", err)
+	} else if deleted {
+		t.Error("expected DeleteTarget to report the missing target as not deleted")
 	}
 }
 

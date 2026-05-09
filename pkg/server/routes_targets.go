@@ -5,13 +5,23 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/nugget/vanitykeygen/pkg/vkg"
 )
 
-// base64Chars is the set of characters that can appear in SSH fingerprints and
-// authorized key strings (standard base64 alphabet plus the SHA256: prefix chars).
+// base64Chars is the standard base64 alphabet (the character set that
+// can appear in raw SSH fingerprints and authorized_keys output). The
+// "SHA256:" prefix that ssh-keygen renders is stripped before
+// matching, so its characters are not included here.
 const base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+
+// Allowed enum values for Target fields.
+var (
+	allowedTargetTypes = map[string]bool{"word": true, "regex": true}
+	allowedMatchScopes = map[string]bool{"fingerprint": true, "pubkey": true, "both": true}
+	allowedCaseModes   = map[string]bool{"insensitive": true, "sensitive": true, "capitalized": true}
+)
 
 // validateWordPattern checks that a word target only contains characters that
 // could actually appear in fingerprint or pubkey output.
@@ -29,6 +39,24 @@ func validateRegexPattern(pattern string) error {
 	_, err := regexp.Compile(pattern)
 	if err != nil {
 		return fmt.Errorf("invalid regex: %w", err)
+	}
+	return nil
+}
+
+// validateTargetEnums checks that Type, MatchScope, and CaseModes are
+// from the supported sets. Empty values are tolerated; defaults are
+// applied later in the store layer.
+func validateTargetEnums(t *vkg.Target) error {
+	if t.Type != "" && !allowedTargetTypes[t.Type] {
+		return fmt.Errorf("type must be one of word, regex (got %q)", t.Type)
+	}
+	if t.MatchScope != "" && !allowedMatchScopes[t.MatchScope] {
+		return fmt.Errorf("match_scope must be one of fingerprint, pubkey, both (got %q)", t.MatchScope)
+	}
+	for _, m := range t.CaseModes {
+		if !allowedCaseModes[m] {
+			return fmt.Errorf("case_modes must be from {insensitive, sensitive, capitalized} (got %q)", m)
+		}
 	}
 	return nil
 }
@@ -55,8 +83,15 @@ func (s *Server) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	// Server owns ID and CreatedAt — clear any client-supplied values.
+	t.ID = ""
+	t.CreatedAt = time.Time{}
 	if t.Pattern == "" {
 		s.writeError(w, http.StatusBadRequest, "pattern is required")
+		return
+	}
+	if err := validateTargetEnums(&t); err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if t.Type == "word" {
@@ -122,32 +157,29 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	// PUT replaces the resource. Server owns ID and CreatedAt; everything
+	// else must be supplied by the caller. There is no field-level merge,
+	// so an omitted boolean or empty string is treated as the new value.
 	t.ID = id
-	// Merge omitted fields from existing target so zero values don't clobber stored data.
+	t.CreatedAt = existing.CreatedAt
 	if t.Type == "" {
-		t.Type = existing.Type
+		s.writeError(w, http.StatusBadRequest, "type is required")
+		return
 	}
 	if t.Pattern == "" {
-		t.Pattern = existing.Pattern
+		s.writeError(w, http.StatusBadRequest, "pattern is required")
+		return
 	}
-	if t.Label == "" {
-		t.Label = existing.Label
-	}
-	if len(t.CaseModes) == 0 {
-		t.CaseModes = existing.CaseModes
-	}
-	if t.MatchScope == "" {
-		t.MatchScope = existing.MatchScope
-	}
-	if t.CreatedAt.IsZero() {
-		t.CreatedAt = existing.CreatedAt
+	if err := validateTargetEnums(&t); err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if t.Type == "word" {
 		if err := validateWordPattern(t.Pattern); err != nil {
 			s.writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-	} else if t.Pattern != existing.Pattern {
+	} else {
 		if err := validateRegexPattern(t.Pattern); err != nil {
 			s.writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -163,9 +195,13 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteTarget(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	matchesDeleted, err := s.store.DeleteTarget(r.Context(), id)
+	matchesDeleted, targetDeleted, err := s.store.DeleteTarget(r.Context(), id)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !targetDeleted {
+		s.writeError(w, http.StatusNotFound, "target not found")
 		return
 	}
 	if matchesDeleted > 0 {
