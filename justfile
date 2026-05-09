@@ -30,7 +30,7 @@ info:
 build target_os=host_os target_arch=host_arch:
     @mkdir -p dist
     GOOS={{target_os}} GOARCH={{target_arch}} CGO_ENABLED=0 go build -trimpath -ldflags "{{ldflags}}" -o dist/vkg-{{target_os}}-{{target_arch}} ./cmd/vkg
-    @if [ "{{target_os}}" = "darwin" ]; then codesign -f -s - dist/vkg-{{target_os}}-{{target_arch}} 2>/dev/null && echo "Signed dist/vkg-{{target_os}}-{{target_arch}}"; fi
+    @if [ "{{target_os}}" = "darwin" ] && [ "{{host_os}}" = "darwin" ]; then codesign -f -s - dist/vkg-{{target_os}}-{{target_arch}} 2>/dev/null && echo "Signed dist/vkg-{{target_os}}-{{target_arch}}"; fi
     @echo "Built dist/vkg-{{target_os}}-{{target_arch}}"
 
 # Build for all release targets
