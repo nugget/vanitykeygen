@@ -1,21 +1,21 @@
-FROM alpine:latest AS builder
+FROM golang:alpine AS builder
 
-RUN apk update && apk upgrade && apk add git make go
+ARG OCI_IMAGE_VERSION="dev"
+
+RUN apk add --no-cache git
 
 WORKDIR /build
 
-COPY . .
-
+COPY go.mod go.sum ./
 RUN go mod download
-RUN go mod verify
 
-RUN make vkgstatic
+COPY . .
+RUN CGO_ENABLED=0 go build -ldflags="-X 'main.gitVersion=${OCI_IMAGE_VERSION}'" -o vkg ./cmd/vkg
 
 FROM alpine:latest
-COPY --from=builder /build/vkg-static-build /bin/vkg
-RUN mkdir -p /vkgdata/keys
-RUN mkdir -p /vkgdata/logs
+COPY --from=builder /build/vkg /bin/vkg
+RUN mkdir -p /vkgdata
 
 EXPOSE 8080
 
-CMD ["/bin/vkg", "server", "-l", "/vkgdata/logs/matchfile.log"]
+CMD ["/bin/vkg", "server", "-d", "/vkgdata/vkg.db"]

@@ -1,0 +1,441 @@
+// VKG Web UI
+
+const API = '';
+
+// --- State ---
+let currentTab = 'dashboard';
+
+// --- Tabs ---
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+    currentTab = btn.dataset.tab;
+    refreshTab(currentTab);
+  });
+});
+
+// --- API helpers ---
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (res.status === 204) return null;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+function formatTime(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  const now = new Date();
+  const diffMs = now - d;
+  if (diffMs < 60000) return Math.floor(diffMs / 1000) + 's ago';
+  if (diffMs < 3600000) return Math.floor(diffMs / 60000) + 'm ago';
+  if (diffMs < 86400000) return Math.floor(diffMs / 3600000) + 'h ago';
+  return d.toLocaleDateString();
+}
+
+function formatNumber(n) {
+  if (n == null) return '-';
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return n.toLocaleString();
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// --- Dashboard ---
+async function refreshDashboard() {
+  const [statsRes, targetsRes, matchesRes] = await Promise.all([
+    api('/api/stats'),
+    api('/api/targets'),
+    api('/api/matches?limit=10'),
+  ]);
+
+  if (statsRes && statsRes.data) {
+    const s = statsRes.data;
+    document.getElementById('stat-clients').textContent = s.active_clients;
+    document.getElementById('stat-keyrate').textContent = formatNumber(Math.round(s.total_key_rate));
+    document.getElementById('stat-keycount').textContent = formatNumber(s.total_key_count);
+    document.getElementById('stat-matches').textContent = s.total_matches;
+  }
+
+  const atEl = document.getElementById('active-targets');
+  const allTargets = targetsRes && targetsRes.data ? targetsRes.data : [];
+  const activeTargets = allTargets.filter(t => t.active);
+  if (activeTargets.length) {
+    atEl.innerHTML = activeTargets.map(t => {
+      const typeLabel = t.type === 'word' ? 'word' : 'regex';
+      const csLabel = t.type === 'word' ? ` (${formatCaseModes(t.case_modes)})` : '';
+      return `<div class="active-target-item"><span class="badge badge-${typeLabel}">${typeLabel}${csLabel}</span> <strong>${escapeHtml(t.label || t.pattern)}</strong> <code>${escapeHtml(t.pattern)}</code></div>`;
+    }).join('');
+  } else {
+    atEl.textContent = 'No active targets';
+  }
+
+  renderRecentMatches(matchesRes && matchesRes.data ? matchesRes.data : []);
+}
+
+function renderRecentMatches(matches) {
+  const tbody = document.querySelector('#recent-matches-table tbody');
+  const empty = document.getElementById('recent-matches-empty');
+  if (!matches.length) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = matches.map(m => `
+    <tr class="clickable" data-match-id="${escapeHtml(m.id)}">
+      <td>${formatTime(m.timestamp)}</td>
+      <td class="mono">${escapeHtml(m.match_string)}</td>
+      <td>${matchTypeBadges(m)}</td>
+      <td>${escapeHtml(m.hostname || m.client_id || '-')}</td>
+    </tr>
+  `).join('');
+}
+
+function matchTypeBadges(m) {
+  let s = '';
+  if (m.matched_fingerprint) s += '<span class="badge badge-fp">FP</span> ';
+  if (m.matched_authorized_key) s += '<span class="badge badge-auth">Auth</span>';
+  return s || '-';
+}
+
+function formatCaseModes(modes) {
+  if (!modes || !modes.length) return 'CI';
+  const map = { insensitive: 'CI', sensitive: 'CS', capitalized: 'Cap' };
+  return modes.map(m => map[m] || m).join('+');
+}
+
+function scopeLabel(scope) {
+  switch (scope) {
+    case 'fingerprint': return 'FP';
+    case 'pubkey': return 'Auth';
+    default: return 'Both';
+  }
+}
+
+// --- Targets ---
+async function refreshTargets() {
+  const res = await api('/api/targets');
+  const targets = res && res.data ? res.data : [];
+  const tbody = document.querySelector('#targets-table tbody');
+  const empty = document.getElementById('targets-empty');
+
+  if (!targets.length) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = targets.map(t => {
+    const typeLabel = t.type === 'word' ? 'word' : 'regex';
+    const csInfo = t.type === 'word' ? ' (' + formatCaseModes(t.case_modes) + ')' : '';
+    const safeId = escapeHtml(t.id);
+    return `
+    <tr>
+      <td>${t.active
+        ? '<span class="badge badge-active">Active</span>'
+        : '<span class="badge badge-inactive">Inactive</span>'}</td>
+      <td><span class="badge badge-${typeLabel}">${typeLabel}${csInfo}</span></td>
+      <td>${escapeHtml(t.label || '-')}</td>
+      <td class="mono">${escapeHtml(t.pattern)}</td>
+      <td>${scopeLabel(t.match_scope)}</td>
+      <td>
+        <button class="btn btn-sm" data-target-id="${safeId}" data-action="edit">Edit</button>
+        <button class="btn btn-sm btn-danger" data-target-id="${safeId}" data-action="delete">Delete</button>
+      </td>
+    </tr>
+  `;
+  }).join('');
+}
+
+// --- Target dialog ---
+const targetTypeEl = document.getElementById('target-type');
+const targetPatternLabel = document.getElementById('target-pattern-label');
+const targetPatternEl = document.getElementById('target-pattern');
+const targetCaseModesRow = document.getElementById('target-case-modes-row');
+
+function updateTargetFormForType() {
+  const isWord = targetTypeEl.value === 'word';
+  targetPatternLabel.textContent = isWord ? 'Word' : 'Pattern (regex)';
+  targetPatternEl.placeholder = isWord ? 'nugget' : '(?i)pattern$';
+  targetCaseModesRow.style.display = isWord ? '' : 'none';
+}
+
+function getCaseModes() {
+  const modes = [];
+  if (document.getElementById('target-cm-insensitive').checked) modes.push('insensitive');
+  if (document.getElementById('target-cm-sensitive').checked) modes.push('sensitive');
+  if (document.getElementById('target-cm-capitalized').checked) modes.push('capitalized');
+  return modes.length ? modes : ['insensitive'];
+}
+
+function setCaseModes(modes) {
+  if (!modes || !modes.length) modes = ['insensitive'];
+  document.getElementById('target-cm-insensitive').checked = modes.includes('insensitive');
+  document.getElementById('target-cm-sensitive').checked = modes.includes('sensitive');
+  document.getElementById('target-cm-capitalized').checked = modes.includes('capitalized');
+}
+
+targetTypeEl.addEventListener('change', updateTargetFormForType);
+
+document.getElementById('btn-new-target').addEventListener('click', () => {
+  document.getElementById('target-dialog-title').textContent = 'New Target';
+  document.getElementById('target-id').value = '';
+  targetTypeEl.value = 'word';
+  targetPatternEl.value = '';
+  document.getElementById('target-label').value = '';
+  document.getElementById('target-match-scope').value = 'both';
+  setCaseModes(['insensitive']);
+  document.getElementById('target-active').checked = true;
+  updateTargetFormForType();
+  document.getElementById('target-dialog').showModal();
+});
+
+document.getElementById('btn-cancel-target').addEventListener('click', () => {
+  document.getElementById('target-dialog').close();
+});
+
+document.getElementById('target-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('target-id').value;
+  const body = {
+    type: targetTypeEl.value,
+    pattern: targetPatternEl.value,
+    label: document.getElementById('target-label').value,
+    match_scope: document.getElementById('target-match-scope').value,
+    case_modes: getCaseModes(),
+    active: document.getElementById('target-active').checked,
+  };
+
+  if (id) {
+    await api(`/api/targets/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  } else {
+    await api('/api/targets', { method: 'POST', body: JSON.stringify(body) });
+  }
+  document.getElementById('target-dialog').close();
+  refreshTargets();
+});
+
+async function editTarget(id) {
+  const res = await api(`/api/targets/${encodeURIComponent(id)}`);
+  if (!res || !res.data) return;
+  const t = res.data;
+  document.getElementById('target-dialog-title').textContent = 'Edit Target';
+  document.getElementById('target-id').value = t.id;
+  targetTypeEl.value = t.type || 'regex';
+  targetPatternEl.value = t.pattern;
+  document.getElementById('target-label').value = t.label;
+  document.getElementById('target-match-scope').value = t.match_scope || 'both';
+  setCaseModes(t.case_modes);
+  document.getElementById('target-active').checked = t.active;
+  updateTargetFormForType();
+  document.getElementById('target-dialog').showModal();
+}
+
+async function deleteTarget(id) {
+  if (!confirm('Delete this target?')) return;
+  await api(`/api/targets/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  refreshTargets();
+}
+
+// Delegated listener for target row action buttons.
+document.querySelector('#targets-table tbody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-target-id]');
+  if (!btn) return;
+  const id = btn.dataset.targetId;
+  if (btn.dataset.action === 'edit') editTarget(id);
+  else if (btn.dataset.action === 'delete') deleteTarget(id);
+});
+
+// --- Matches ---
+async function refreshMatches() {
+  const res = await api('/api/matches?limit=100');
+  const matches = res && res.data ? res.data : [];
+  const tbody = document.querySelector('#matches-table tbody');
+  const empty = document.getElementById('matches-empty');
+
+  if (!matches.length) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = matches.map(m => {
+    const auth = (m.key && m.key.authorized_string) || '';
+    const preview = auth.slice(0, 40) + (auth.length > 40 ? '...' : '');
+    return `
+    <tr class="clickable" data-match-id="${escapeHtml(m.id)}">
+      <td>${formatTime(m.timestamp)}</td>
+      <td class="mono">${escapeHtml(m.match_string)}</td>
+      <td class="mono">${escapeHtml((m.key && m.key.fingerprint) || '-')}</td>
+      <td class="mono" title="${escapeHtml(auth)}">${escapeHtml(preview)}</td>
+      <td>${escapeHtml(m.hostname || m.client_id || '-')}</td>
+    </tr>
+  `;
+  }).join('');
+}
+
+function copyableBlock(label, value) {
+  const id = 'copy-' + Math.random().toString(36).slice(2, 8);
+  return `
+    <div class="detail-row"><span class="detail-label">${escapeHtml(label)}</span></div>
+    <div class="copyable-section">
+      <button class="btn-copy" id="${id}">Copy</button>
+      <pre id="${id}-val">${escapeHtml(value || '-')}</pre>
+    </div>
+  `;
+}
+
+function copyToClipboard(blockId, btn) {
+  const text = document.getElementById(blockId + '-val').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+
+async function viewMatch(id) {
+  const res = await api(`/api/matches/${encodeURIComponent(id)}`);
+  if (!res || !res.data) return;
+  const m = res.data;
+  const c = document.getElementById('match-detail-content');
+  c.innerHTML = `
+    <div class="detail-row"><span class="detail-label">ID</span><span class="mono">${escapeHtml(m.id)}</span></div>
+    <div class="detail-row"><span class="detail-label">Time</span><span>${new Date(m.timestamp).toLocaleString()}</span></div>
+    <div class="detail-row"><span class="detail-label">Match</span><span class="mono">${escapeHtml(m.match_string)}</span></div>
+    <div class="detail-row"><span class="detail-label">Type</span><span>${matchTypeBadges(m)}</span></div>
+    <div class="detail-row"><span class="detail-label">Client</span><span>${escapeHtml(m.hostname || '-')} (${escapeHtml(m.client_id || '-')})</span></div>
+    <div class="detail-row"><span class="detail-label">Fingerprint</span><span class="mono">${escapeHtml((m.key && m.key.fingerprint) || '-')}</span></div>
+    ${copyableBlock('Auth Key', (m.key && m.key.authorized_string) || '')}
+    ${copyableBlock('Private Key', (m.key && m.key.private_string) || '')}
+  `;
+  // Delegated copy-button listener; the block IDs are local random hex.
+  c.querySelectorAll('.btn-copy').forEach(btn => {
+    btn.addEventListener('click', () => copyToClipboard(btn.id, btn));
+  });
+  document.getElementById('match-detail-dialog').showModal();
+}
+
+// Delegated listeners for clickable match rows.
+function bindMatchRowClicks(tbody) {
+  tbody.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-match-id]');
+    if (!tr) return;
+    viewMatch(tr.dataset.matchId);
+  });
+}
+bindMatchRowClicks(document.querySelector('#recent-matches-table tbody'));
+bindMatchRowClicks(document.querySelector('#matches-table tbody'));
+
+document.getElementById('btn-close-match-detail').addEventListener('click', () => {
+  document.getElementById('match-detail-dialog').close();
+});
+
+// --- Fleet ---
+async function refreshFleet() {
+  const res = await api('/api/clients');
+  const clients = res && res.data ? res.data : [];
+  const tbody = document.querySelector('#fleet-table tbody');
+  const empty = document.getElementById('fleet-empty');
+
+  if (!clients.length) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = clients.map(c => {
+    const statusClass = c.status === 'active' ? 'badge-active'
+      : c.status === 'offline' ? 'badge-offline' : 'badge-idle';
+    return `
+      <tr>
+        <td><span class="badge ${statusClass}">${escapeHtml(c.status)}</span></td>
+        <td>${escapeHtml(c.hostname)}</td>
+        <td class="mono">${escapeHtml(c.id)}</td>
+        <td>${c.seekers}</td>
+        <td class="mono">${formatNumber(Math.round(c.key_rate))}/s</td>
+        <td class="mono">${formatNumber(c.key_count)}</td>
+        <td>${formatTime(c.last_seen)}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// --- Tab refresh ---
+function refreshTab(tab) {
+  switch (tab) {
+    case 'dashboard': refreshDashboard(); break;
+    case 'targets': refreshTargets(); break;
+    case 'matches': refreshMatches(); break;
+    case 'fleet': refreshFleet(); break;
+  }
+}
+
+// --- SSE ---
+function connectSSE() {
+  const statusEl = document.getElementById('sse-status');
+  const evtSource = new EventSource(API + '/api/events');
+
+  evtSource.onopen = () => {
+    statusEl.textContent = 'Connected';
+    statusEl.className = 'sse-connected';
+  };
+
+  evtSource.onerror = () => {
+    statusEl.textContent = 'Disconnected';
+    statusEl.className = 'sse-disconnected';
+    evtSource.close();
+    // Reconnect after 3s
+    setTimeout(connectSSE, 3000);
+  };
+
+  evtSource.addEventListener('match', () => {
+    if (currentTab === 'dashboard') refreshDashboard();
+    if (currentTab === 'matches') refreshMatches();
+  });
+
+  evtSource.addEventListener('client_update', () => {
+    if (currentTab === 'dashboard') refreshDashboard();
+    if (currentTab === 'fleet') refreshFleet();
+  });
+
+  evtSource.addEventListener('target_update', () => {
+    if (currentTab === 'dashboard') refreshDashboard();
+    if (currentTab === 'targets') refreshTargets();
+  });
+}
+
+// --- Version ---
+async function fetchVersion() {
+  const res = await api('/api/version');
+  if (res && res.data && res.data.version) {
+    document.getElementById('app-version').textContent = res.data.version;
+  }
+}
+
+// --- Init ---
+refreshDashboard();
+fetchVersion();
+connectSSE();
+
+// Periodic refresh for time-based displays
+setInterval(() => refreshTab(currentTab), 30000);

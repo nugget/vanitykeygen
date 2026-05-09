@@ -1,11 +1,15 @@
+// Package client implements the VKG seeker client: it registers with a
+// server, polls for the active compiled patterns, runs a pool of seeker
+// goroutines that generate ED25519 keys and test them against the
+// patterns, and reports any matches back to the server.
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"flag"
 	"fmt"
 	"io"
@@ -14,31 +18,48 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
-	"runtime/debug"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/nugget/vanitykeygen/pkg/keygen"
 	"github.com/nugget/vanitykeygen/pkg/vkg"
-
-	"github.com/mikesmitty/edkey"
-	"golang.org/x/crypto/ed25519"
-	"golang.org/x/crypto/ssh"
 )
+
+// Version is set at build time via ldflags.
+var Version = "dev"
 
 var (
-	logger   *slog.Logger
-	logLevel *slog.LevelVar
-	target   string
-
-	serverURI string
+	serverURI  string
+	numSeekers int
 )
 
+// FlagSet returns the flag set understood by the client subcommand.
+// Callers register the flags via Run; this is exposed so the top-level
+// `vkg` binary can render `--help` output for both subcommands.
 func FlagSet() *flag.FlagSet {
-	f := flag.NewFlagSet("server", flag.ExitOnError)
-
-	f.StringVar(&serverURI, "s", "https://vkg", "vkg server URI (default 'https://vkg')")
-
+	f := flag.NewFlagSet("client", flag.ExitOnError)
+	f.StringVar(&serverURI, "s", "https://vkg", "VKG server URI")
+	f.IntVar(&numSeekers, "n", runtime.NumCPU(), "Number of seeker goroutines")
 	return f
+}
+
+// Client is the VKG key-searching client.
+type Client struct {
+	logger     *slog.Logger
+	httpClient *http.Client
+	serverURI  string
+	clientID   string
+	hostname   string
+	version    string
+	seekers    int
+
+	patterns      atomic.Value // stores []vkg.CompiledPattern
+	keyCount      atomic.Int64
+	lastHeartbeat time.Time
+	lastKeyCount  int64
 }
 
 type seekerStatus struct {
@@ -48,121 +69,127 @@ type seekerStatus struct {
 	matchString          string
 	matchedAuthorizedKey bool
 	matchedFingerprint   bool
-	key                  GenerateKeyResult
+	key                  keygen.Result
 }
 
-type telemetry struct {
-	launchStartTime time.Time
-	searchStartTime time.Time
-	keyCount        int
-	hitCount        int
-}
-
-func newTelemetry() telemetry {
-	return telemetry{
-		launchStartTime: time.Now(),
-		searchStartTime: time.Now(),
-		keyCount:        1,
-		hitCount:        0,
-	}
-}
-
+// LogValue implements slog.LogValuer so a seekerStatus renders as a
+// structured group when included in a log call.
 func (s seekerStatus) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.Time("timestamp", s.timestamp),
 		slog.Int("sid", s.sid),
-		slog.Int("keyCount", s.keyCount),
-		slog.Bool("matchedAuthorizedKey", s.matchedAuthorizedKey),
-		slog.Bool("matchedFingerprint", s.matchedFingerprint),
-		slog.String("fingerprint", s.key.fingerprint),
-		slog.String("auth", s.key.authorizedKey),
+		slog.Int("key_count", s.keyCount),
+		slog.Bool("matched_authorized_key", s.matchedAuthorizedKey),
+		slog.Bool("matched_fingerprint", s.matchedFingerprint),
+		slog.String("fingerprint", s.key.Fingerprint),
+		slog.String("auth", s.key.AuthorizedKey),
 	)
 }
 
-type GenerateKeyResult struct {
-	publicKey     ed25519.PublicKey
-	privateKey    ed25519.PrivateKey
-	sshKey        ssh.PublicKey
-	pemKey        *pem.Block
-	authorizedKey string
-	fingerprint   string
-	encodedKey    []byte
+type telemetry struct {
+	launchStartTime time.Time
+	keyCount        int
+	hitCount        int
 }
 
-func GenerateKey(w io.Reader) (GenerateKeyResult, error) {
-	var (
-		k   GenerateKeyResult
-		err error
-	)
-
-	k.publicKey, k.privateKey, err = ed25519.GenerateKey(w)
-	if err != nil {
-		return GenerateKeyResult{}, err
-	}
-
-	k.sshKey, err = ssh.NewPublicKey(k.publicKey)
-	if err != nil {
-		return GenerateKeyResult{}, err
-	}
-
-	k.pemKey = &pem.Block{
-		Type:  "OPENSSH PRIVATE KEY",
-		Bytes: edkey.MarshalED25519PrivateKey(k.privateKey),
-	}
-
-	k.encodedKey = pem.EncodeToMemory(k.pemKey)
-
-	k.authorizedKey = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(k.sshKey)))
-
-	h := sha256.New()
-	h.Write(k.sshKey.Marshal())
-	k.fingerprint = base64.StdEncoding.EncodeToString(h.Sum(nil))
-
-	return k, nil
+type compiledPattern struct {
+	pattern            string
+	re                 *regexp.Regexp
+	matchFingerprint   bool
+	matchAuthorizedKey bool
 }
 
-func seeker(ctx context.Context, statusUpdates chan seekerStatus, sid int) {
-	logger := logger.With("sid", sid)
+func (c *Client) currentPatterns() []vkg.CompiledPattern {
+	v := c.patterns.Load()
+	if v == nil {
+		return nil
+	}
+	return v.([]vkg.CompiledPattern)
+}
+
+func (c *Client) seeker(ctx context.Context, statusUpdates chan<- seekerStatus, sid int) {
+	logger := c.logger.With("sid", sid)
 	logger.Info("seeker starting")
 
-	var (
-		lastTarget string
-		re         *regexp.Regexp
-		err        error
-	)
+	var compiled []compiledPattern
 
-	statusTrigger := time.Tick(5 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
 	keyCount := 0
 
 	for {
-		if target != lastTarget {
-			re, err = regexp.Compile(target)
-			if err != nil {
-				logger.Error("unable to compile regexp", "error", err)
-			}
-			logger.Warn("new target detected", "lastTarget", lastTarget, "target", target, "re", re)
-			lastTarget = target
+		select {
+		case <-ctx.Done():
+			logger.Info("seeker stopping")
+			return
+		default:
 		}
 
-		if target == "" {
-			logger.Info("no current target, sleeping")
-			time.Sleep(1 * time.Minute)
-		} else {
+		patterns := c.currentPatterns()
+		if len(patterns) == 0 {
+			time.Sleep(1 * time.Second)
+			continue
+		}
 
-			k, err := GenerateKey(nil)
-			if err != nil {
-				logger.Warn("error generating key", "error", err)
-				time.Sleep(1 * time.Minute)
+		// Recompile regexps when patterns change
+		if !patternsMatch(compiled, patterns) {
+			compiled = compiled[:0]
+			for _, p := range patterns {
+				re, err := regexp.Compile(p.Pattern)
+				if err != nil {
+					logger.Error("unable to compile regexp", "pattern", p.Pattern, "error", err)
+					continue
+				}
+				compiled = append(compiled, compiledPattern{
+					pattern:            p.Pattern,
+					re:                 re,
+					matchFingerprint:   p.MatchFingerprint,
+					matchAuthorizedKey: p.MatchAuthorizedKey,
+				})
 			}
+			patternStrs := make([]string, len(compiled))
+			for i, cp := range compiled {
+				patternStrs[i] = cp.pattern
+			}
+			logger.Info("patterns updated", "count", len(compiled), "patterns", patternStrs)
+		}
 
-			matchedFingerprint := re.MatchString(k.fingerprint)
-			matchedAuthorizedKey := re.MatchString(k.authorizedKey)
+		if len(compiled) == 0 {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		k, err := keygen.Generate()
+		if err != nil {
+			logger.Warn("error generating key", "error", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		// Count once per generated key, including the key that matches.
+		// Reporting (match send or ticker tick) consumes the local count.
+		c.keyCount.Add(1)
+		keyCount++
+
+		// Test key against all compiled patterns
+		for _, cp := range compiled {
+			var matchedFingerprint, matchedAuthorizedKey bool
+			if cp.matchFingerprint {
+				matchedFingerprint = cp.re.MatchString(k.Fingerprint)
+			}
+			if cp.matchAuthorizedKey {
+				matchedAuthorizedKey = cp.re.MatchString(k.AuthorizedKey)
+			}
 
 			if matchedFingerprint || matchedAuthorizedKey {
 				var matchString strings.Builder
-				matchString.WriteString(re.FindString(k.fingerprint))
-				matchString.WriteString(re.FindString(k.authorizedKey))
+				if matchedFingerprint {
+					matchString.WriteString(cp.re.FindString(k.Fingerprint))
+				}
+				if matchedAuthorizedKey {
+					matchString.WriteString(cp.re.FindString(k.AuthorizedKey))
+				}
 
 				s := seekerStatus{
 					timestamp:            time.Now(),
@@ -173,181 +200,301 @@ func seeker(ctx context.Context, statusUpdates chan seekerStatus, sid int) {
 					matchedFingerprint:   matchedFingerprint,
 					key:                  k,
 				}
-				statusUpdates <- s
-
+				select {
+				case statusUpdates <- s:
+				case <-ctx.Done():
+					return
+				}
 				keyCount = 0
 			}
 		}
 
+		// Non-blocking ticker check: every 5s, report the running count.
 		select {
-		case <-statusTrigger:
+		case <-ticker.C:
 			s := seekerStatus{
 				timestamp: time.Now(),
 				sid:       sid,
 				keyCount:  keyCount,
-				key:       GenerateKeyResult{},
 			}
-			statusUpdates <- s
+			select {
+			case statusUpdates <- s:
+			case <-ctx.Done():
+				return
+			}
 			keyCount = 0
 		default:
-			keyCount++
 		}
 	}
 }
 
-func displayStats(t *telemetry) {
-	launchDuration := time.Now().Sub(t.launchStartTime)
-	searchDuration := time.Now().Sub(t.searchStartTime)
-
-	hitRate := float64(t.hitCount) / float64(t.keyCount) * 100
-
-	logger.Debug("Runtime Stats",
-		"launchDuration", launchDuration,
-		"searchDuration", searchDuration,
-		"keyCount", t.keyCount,
-		"hitCount", t.hitCount,
-		"hitRate", hitRate,
-	)
+// patternsMatch reports whether the locally compiled patterns are
+// already in sync with patterns served by the server, including the
+// scope flags. A scope-only change (same regex, different
+// match_scope) must trigger a recompile so seekers don't keep testing
+// against the stale scope.
+func patternsMatch(compiled []compiledPattern, patterns []vkg.CompiledPattern) bool {
+	if len(compiled) != len(patterns) {
+		return false
+	}
+	for i, cp := range compiled {
+		if cp.pattern != patterns[i].Pattern ||
+			cp.matchFingerprint != patterns[i].MatchFingerprint ||
+			cp.matchAuthorizedKey != patterns[i].MatchAuthorizedKey {
+			return false
+		}
+	}
+	return true
 }
 
-func recordStatus(s seekerStatus, t *telemetry) error {
-	t.keyCount += s.keyCount
+// fetchTargets fetches compiled patterns from the server.
+func (c *Client) fetchTargets() error {
+	resp, err := c.httpClient.Get(c.serverURI + "/api/targets/active")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
 
-	if s.key.fingerprint != "" {
-		logger.Warn("run select hit", "s", s)
-		// fmt.Printf("%s:\n%s\n", s.key.authorizedKey, s.key.encodedKey)
-		t.hitCount++
-
-		p := vkg.Match{}
-		p.Hostname, _ = os.Hostname()
-		p.SeekerID = s.sid
-		p.Key.PrivateKey = s.key.privateKey
-		p.Key.PublicKey = s.key.publicKey
-		p.Key.EncodedKey = s.key.encodedKey
-		p.Key.PrivateString = fmt.Sprintf("%s", s.key.encodedKey)
-		p.Key.AuthorizedString = s.key.authorizedKey
-		p.Key.Fingerprint = s.key.fingerprint
-		p.MatchString = s.matchString
-		p.MatchedAuthorizedKey = s.matchedAuthorizedKey
-		p.MatchedFingerprint = s.matchedFingerprint
-
-		b, err := json.Marshal(p)
-		if err != nil {
-			return fmt.Errorf("json.Marshal: %w", err)
-		}
-
-		requestBody := strings.NewReader(string(b))
-
-		_, err = http.Post(serverURI+"/match", "application/json", requestBody)
-		if err != nil {
-			return fmt.Errorf("http.Post: %w", err)
-		}
-
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("fetch targets: server returned %s", resp.Status)
 	}
 
+	var result struct {
+		Data []vkg.CompiledPattern `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode patterns: %w", err)
+	}
+
+	c.patterns.Store(result.Data)
+	c.logger.Debug("patterns fetched", "count", len(result.Data))
 	return nil
 }
 
-func myVersion() string {
-	v := "unknown"
-
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		logger.Warn("error reading build info")
-	} else {
-		for _, s := range info.Settings {
-			if s.Key == "vcs.time" {
-				v = s.Value
-			}
-		}
-	}
-
-	return v
+// stableID derives a deterministic client ID from the hostname so it
+// persists across restarts without needing local state files.
+func stableID(hostname string) string {
+	h := sha256.Sum256([]byte("vkg-client:" + hostname))
+	return hex.EncodeToString(h[:8])
 }
 
-func getTarget() (string, error) {
-	r, err := http.Get(serverURI + "/target")
-	if err != nil {
-		return "", err
+func (c *Client) register() error {
+	req := vkg.RegisterRequest{
+		ClientID: stableID(c.hostname),
+		Hostname: c.hostname,
+		Version:  c.version,
+		Seekers:  c.seekers,
 	}
-	logger.Debug("target requested", "code", r.StatusCode)
-
-	var t vkg.Target
-
-	decoder := json.NewDecoder(r.Body)
-	err = decoder.Decode(&t)
-	if err != nil {
-		logger.Error("Decoder Failed", "error", err)
-	}
-
-	logger.Debug("target is", "target", t.MatchString)
-
-	return t.MatchString, nil
-}
-
-// run is the real main, but one where we can exit with an error.
-func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer, getenv func(string) string, args []string) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
-	logger = l
-
-	myFlags := FlagSet()
-	err := myFlags.Parse(args)
+	b, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
 
-	val := getenv("VKG_SERVER_URI")
-	if val != "" {
+	resp, err := c.httpClient.Post(c.serverURI+"/api/clients/register", "application/json", bytes.NewReader(b))
+	if err != nil {
+		return fmt.Errorf("register: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("register: server returned %s", resp.Status)
+	}
+
+	var result struct {
+		Data vkg.RegisterResponse `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode register response: %w", err)
+	}
+
+	c.clientID = result.Data.ClientID
+	c.logger.Info("registered with server", "client_id", c.clientID)
+	return nil
+}
+
+func (c *Client) sendHeartbeat() error {
+	now := time.Now()
+	currentCount := c.keyCount.Load()
+
+	var keyRate float64
+	elapsed := now.Sub(c.lastHeartbeat).Seconds()
+	if elapsed > 0 && c.lastHeartbeat != (time.Time{}) {
+		keyRate = float64(currentCount-c.lastKeyCount) / elapsed
+	}
+	c.lastHeartbeat = now
+	c.lastKeyCount = currentCount
+
+	hb := vkg.Heartbeat{
+		ClientID: c.clientID,
+		Hostname: c.hostname,
+		Version:  c.version,
+		Seekers:  c.seekers,
+		KeyRate:  keyRate,
+		KeyCount: currentCount,
+	}
+	b, err := json.Marshal(hb)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Post(c.serverURI+"/api/clients/heartbeat", "application/json", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("heartbeat: server returned %s", resp.Status)
+	}
+	return nil
+}
+
+func (c *Client) reportMatch(s seekerStatus) error {
+	m := vkg.Match{
+		ClientID:             c.clientID,
+		Hostname:             c.hostname,
+		SeekerID:             s.sid,
+		MatchString:          s.matchString,
+		MatchedAuthorizedKey: s.matchedAuthorizedKey,
+		MatchedFingerprint:   s.matchedFingerprint,
+		Key: vkg.Key{
+			PrivateKey:       s.key.PrivateKey,
+			PublicKey:        s.key.PublicKey,
+			EncodedKey:       s.key.EncodedKey,
+			PrivateString:    string(s.key.EncodedKey),
+			AuthorizedString: s.key.AuthorizedKey,
+			Fingerprint:      s.key.Fingerprint,
+		},
+	}
+
+	b, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal match: %w", err)
+	}
+
+	resp, err := c.httpClient.Post(c.serverURI+"/api/matches", "application/json", bytes.NewReader(b))
+	if err != nil {
+		return fmt.Errorf("post match: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("report match: server returned %s", resp.Status)
+	}
+	return nil
+}
+
+// Run starts the client. It blocks until interrupted or a fatal error occurs.
+func Run(ctx context.Context, l *slog.Logger, stdout io.Writer, stderr io.Writer, getenv func(string) string, args []string) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	defer stop()
+
+	myFlags := FlagSet()
+	if err := myFlags.Parse(args); err != nil {
+		return err
+	}
+
+	if val := getenv("VKG_SERVER_URI"); val != "" {
 		serverURI = val
 	}
 
-	target, err = getTarget()
-	if err != nil {
-		return err
+	hostname, _ := os.Hostname()
+
+	l.Info("vkg client starting", "version", Version, "hostname", hostname, "seekers", numSeekers, "server", serverURI)
+
+	c := &Client{
+		logger:    l,
+		serverURI: serverURI,
+		hostname:  hostname,
+		version:   Version,
+		seekers:   numSeekers,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}
 
-	statusUpdates := make(chan seekerStatus)
+	// Lower process priority so seekers are friendlier to other processes
+	if err := setProcessNiceness(10); err != nil {
+		c.logger.Warn("failed to set process niceness", "error", err)
+	} else {
+		c.logger.Info("process niceness set", "nice", 10)
+	}
 
-	go seeker(ctx, statusUpdates, 1)
-	go seeker(ctx, statusUpdates, 2)
-	go seeker(ctx, statusUpdates, 3)
+	// Register with server
+	if err := c.register(); err != nil {
+		return fmt.Errorf("registration failed: %w", err)
+	}
 
-	runtimeStats := newTelemetry()
-	statsTrigger := time.Tick(5 * time.Second)
-	checkTarget := time.Tick(20 * time.Second)
+	// Fetch initial target
+	if err := c.fetchTargets(); err != nil {
+		return fmt.Errorf("initial target fetch: %w", err)
+	}
 
-RunLoop:
+	statusUpdates := make(chan seekerStatus, c.seekers*2)
+
+	// Launch seekers
+	var wg sync.WaitGroup
+	for i := 1; i <= c.seekers; i++ {
+		wg.Add(1)
+		go func(sid int) {
+			defer wg.Done()
+			c.seeker(ctx, statusUpdates, sid)
+		}(i)
+	}
+
+	stats := telemetry{
+		launchStartTime: time.Now(),
+	}
+
+	statsTicker := time.NewTicker(5 * time.Second)
+	defer statsTicker.Stop()
+	targetTicker := time.NewTicker(20 * time.Second)
+	defer targetTicker.Stop()
+	heartbeatTicker := time.NewTicker(15 * time.Second)
+	defer heartbeatTicker.Stop()
+
+loop:
 	for {
 		select {
-		case <-checkTarget:
-			target, err = getTarget()
-			if err != nil {
-				target = ""
-				logger.Error("Unable to fetch target", "error", err)
+		case <-targetTicker.C:
+			if err := c.fetchTargets(); err != nil {
+				c.logger.Error("failed to fetch target", "error", err)
 			}
-			// runtimeStats.searchStartTime = time.Now()
-			// runtimeStats.keyCount = 1
-			// runtimeStats.hitCount = 0
-		case <-statsTrigger:
-			displayStats(&runtimeStats)
+		case <-heartbeatTicker.C:
+			if err := c.sendHeartbeat(); err != nil {
+				c.logger.Warn("heartbeat failed", "error", err)
+			}
+		case <-statsTicker.C:
+			hitRate := float64(0)
+			if stats.keyCount > 0 {
+				hitRate = float64(stats.hitCount) / float64(stats.keyCount) * 100
+			}
+			c.logger.Debug("stats",
+				"duration", time.Since(stats.launchStartTime),
+				"keys", stats.keyCount,
+				"hits", stats.hitCount,
+				"hit_rate", hitRate,
+			)
 		case s := <-statusUpdates:
-			err := recordStatus(s, &runtimeStats)
-			if err != nil {
-				logger.Warn("unable to record status",
-					"hit", s,
-					"error", err,
-				)
+			stats.keyCount += s.keyCount
+
+			if s.key.Fingerprint != "" {
+				stats.hitCount++
+				c.logger.Info("match found", "s", s)
+
+				if err := c.reportMatch(s); err != nil {
+					c.logger.Warn("failed to report match", "error", err)
+				}
 			}
 		case <-ctx.Done():
-			stop()
-			break RunLoop
-		default:
-			time.Sleep(250 * time.Millisecond)
+			break loop
 		}
 	}
-	logger.Warn("interrupt detected", "err", ctx.Err())
+
+	c.logger.Info("shutting down, waiting for seekers...")
+	wg.Wait()
+	c.logger.Info("shutdown complete")
 
 	return nil
 }

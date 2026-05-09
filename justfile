@@ -1,0 +1,161 @@
+project  := "vkg"
+registry := "ghcr.io"
+owner    := "nugget"
+image    := registry / owner / "vanitykeygen"
+
+platforms := "linux/amd64,linux/arm64"
+
+version  := `git describe --always --long --tags --dirty 2>/dev/null || echo "dev"`
+revision := `git rev-parse HEAD 2>/dev/null || echo "unknown"`
+created  := `date -u +"%Y-%m-%dT%H:%M:%SZ"`
+
+host_os   := `uname -s | tr '[:upper:]' '[:lower:]'`
+host_arch := if `uname -m` == "x86_64" { "amd64" } else if `uname -m` == "aarch64" { "arm64" } else if `uname -m` == "arm64" { "arm64" } else { `uname -m` }
+
+ldflags := "-s -w -X 'main.gitVersion=" + version + "'"
+
+# List available recipes
+default:
+    @just --list
+
+# Show build metadata
+[group('info')]
+info:
+    @echo "Version:  {{ version }}"
+    @echo "Revision: {{ revision }}"
+    @echo "Image:    {{ image }}"
+
+# Build a binary into dist/ (defaults to current platform, or specify OS/ARCH)
+[group('build')]
+build target_os=host_os target_arch=host_arch:
+    @mkdir -p dist
+    GOOS={{target_os}} GOARCH={{target_arch}} CGO_ENABLED=0 go build -trimpath -ldflags "{{ldflags}}" -o dist/vkg-{{target_os}}-{{target_arch}} ./cmd/vkg
+    @if [ "{{target_os}}" = "darwin" ] && [ "{{host_os}}" = "darwin" ]; then codesign -f -s - dist/vkg-{{target_os}}-{{target_arch}} 2>/dev/null && echo "Signed dist/vkg-{{target_os}}-{{target_arch}}"; fi
+    @echo "Built dist/vkg-{{target_os}}-{{target_arch}}"
+
+# Build for all release targets
+[group('build')]
+build-all:
+    just build linux amd64
+    just build linux arm64
+    just build darwin amd64
+    just build darwin arm64
+
+# Build and show version
+[group('build')]
+version: build
+    dist/vkg-{{host_os}}-{{host_arch}} version
+
+# Run all tests
+[group('test')]
+test:
+    go test ./...
+
+# Run go vet
+[group('test')]
+vet:
+    go vet ./...
+
+# Check formatting
+[group('test')]
+fmt-check:
+    @test -z "$(gofmt -l .)" || (echo "Files need formatting:"; gofmt -l .; exit 1)
+
+# Check go.mod is tidy
+[group('test')]
+mod-tidy-check:
+    go mod tidy
+    @git diff --exit-code go.mod go.sum || (echo "go.mod/go.sum not tidy; run 'go mod tidy'"; exit 1)
+
+# Run golangci-lint
+[group('test')]
+lint:
+    golangci-lint run ./...
+
+# CI: fmt, mod-tidy, vet, lint, test, and build all targets
+[group('test')]
+ci: fmt-check mod-tidy-check vet lint test build-all
+
+# Run the server locally
+[group('run')]
+run-server: build
+    dist/vkg-{{host_os}}-{{host_arch}} server
+
+# Run a client locally
+[group('run')]
+run-client: build
+    dist/vkg-{{host_os}}-{{host_arch}} client
+
+# Clean build artifacts
+[group('build')]
+clean:
+    rm -rf dist
+
+default_tag := version
+
+# Build and push multi-arch container to ghcr.io
+[group('container')]
+package tag=default_tag:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "Building multi-arch image: {{ image }}:{{ tag }}"
+    echo "Platforms: {{ platforms }}"
+
+    # Ensure builder exists
+    builder="vkg-builder"
+    if ! docker buildx inspect "$builder" &>/dev/null; then
+        docker buildx create --name "$builder" --driver docker-container
+    fi
+
+    # Build and push with version tags
+    docker buildx build \
+        --builder "$builder" \
+        --platform {{ platforms }} \
+        --build-arg OCI_IMAGE_VERSION={{ tag }} \
+        --label "org.opencontainers.image.created={{ created }}" \
+        --label "org.opencontainers.image.revision={{ revision }}" \
+        --label "org.opencontainers.image.version={{ tag }}" \
+        --label "org.opencontainers.image.source=https://github.com/{{ owner }}/vanitykeygen" \
+        -t {{ image }}:{{ tag }} \
+        -t {{ image }}:latest \
+        --push .
+
+    echo ""
+    echo "Pushed: {{ image }}:{{ tag }}"
+    echo "Pushed: {{ image }}:latest"
+
+# Login to GitHub Container Registry
+[group('container')]
+ghcr-login:
+    docker login ghcr.io -u {{ owner }}
+
+# Build, push, and attach image to a GitHub release
+[group('container')]
+release tag: (package tag)
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "Attaching container image reference to release {{ tag }}"
+
+    # Create a manifest file to attach as a release asset
+    manifest=$(mktemp)
+    cat > "$manifest" <<MANIFEST
+    {
+        "image": "{{ image }}:{{ tag }}",
+        "platforms": "{{ platforms }}",
+        "created": "{{ created }}",
+        "revision": "{{ revision }}"
+    }
+    MANIFEST
+
+    # Upload as release asset if the release exists
+    if gh release view "{{ tag }}" &>/dev/null; then
+        gh release upload "{{ tag }}" "$manifest#container-manifest.json" --clobber
+        echo "Attached manifest to release {{ tag }}"
+    else
+        echo "Release {{ tag }} not found. Create it with:"
+        echo "  gh release create {{ tag }} --title '{{ tag }}' --generate-notes"
+    fi
+
+    rm -f "$manifest"
