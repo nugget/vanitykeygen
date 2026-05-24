@@ -64,7 +64,7 @@ func validateTargetEnums(t *vkg.Target) error {
 func (s *Server) handleListTargets(w http.ResponseWriter, r *http.Request) {
 	targets, err := s.store.ListTargets(r.Context())
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if targets == nil {
@@ -80,33 +80,33 @@ func (s *Server) handleListTargets(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 	var t vkg.Target
 	if err := s.readJSON(r, &t); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid JSON")
+		s.writeError(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	// Server owns ID and CreatedAt — clear any client-supplied values.
 	t.ID = ""
 	t.CreatedAt = time.Time{}
 	if t.Pattern == "" {
-		s.writeError(w, http.StatusBadRequest, "pattern is required")
+		s.writeError(w, r, http.StatusBadRequest, "pattern is required")
 		return
 	}
 	if err := validateTargetEnums(&t); err != nil {
-		s.writeError(w, http.StatusBadRequest, err.Error())
+		s.writeError(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	if t.Type == "word" {
 		if err := validateWordPattern(t.Pattern); err != nil {
-			s.writeError(w, http.StatusBadRequest, err.Error())
+			s.writeError(w, r, http.StatusBadRequest, err.Error())
 			return
 		}
 	} else {
 		if err := validateRegexPattern(t.Pattern); err != nil {
-			s.writeError(w, http.StatusBadRequest, err.Error())
+			s.writeError(w, r, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 	if err := s.store.CreateTarget(r.Context(), &t); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.hub.Broadcast("target_update", t)
@@ -117,11 +117,11 @@ func (s *Server) handleGetTarget(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	t, err := s.store.GetTarget(r.Context(), id)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if t == nil {
-		s.writeError(w, http.StatusNotFound, "target not found")
+		s.writeError(w, r, http.StatusNotFound, "target not found")
 		return
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{"data": t})
@@ -130,7 +130,7 @@ func (s *Server) handleGetTarget(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetActiveTargets(w http.ResponseWriter, r *http.Request) {
 	targets, err := s.store.ListActiveTargets(r.Context())
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	compiled := compilePatterns(targets)
@@ -144,17 +144,17 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	existing, err := s.store.GetTarget(r.Context(), id)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if existing == nil {
-		s.writeError(w, http.StatusNotFound, "target not found")
+		s.writeError(w, r, http.StatusNotFound, "target not found")
 		return
 	}
 
 	var t vkg.Target
 	if err := s.readJSON(r, &t); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid JSON")
+		s.writeError(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	// PUT replaces the resource. Server owns ID and CreatedAt; everything
@@ -163,30 +163,30 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request) {
 	t.ID = id
 	t.CreatedAt = existing.CreatedAt
 	if t.Type == "" {
-		s.writeError(w, http.StatusBadRequest, "type is required")
+		s.writeError(w, r, http.StatusBadRequest, "type is required")
 		return
 	}
 	if t.Pattern == "" {
-		s.writeError(w, http.StatusBadRequest, "pattern is required")
+		s.writeError(w, r, http.StatusBadRequest, "pattern is required")
 		return
 	}
 	if err := validateTargetEnums(&t); err != nil {
-		s.writeError(w, http.StatusBadRequest, err.Error())
+		s.writeError(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	if t.Type == "word" {
 		if err := validateWordPattern(t.Pattern); err != nil {
-			s.writeError(w, http.StatusBadRequest, err.Error())
+			s.writeError(w, r, http.StatusBadRequest, err.Error())
 			return
 		}
 	} else {
 		if err := validateRegexPattern(t.Pattern); err != nil {
-			s.writeError(w, http.StatusBadRequest, err.Error())
+			s.writeError(w, r, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 	if err := s.store.UpdateTarget(r.Context(), &t); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.hub.Broadcast("target_update", t)
@@ -197,11 +197,11 @@ func (s *Server) handleDeleteTarget(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	matchesDeleted, targetDeleted, err := s.store.DeleteTarget(r.Context(), id)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !targetDeleted {
-		s.writeError(w, http.StatusNotFound, "target not found")
+		s.writeError(w, r, http.StatusNotFound, "target not found")
 		return
 	}
 	if matchesDeleted > 0 {

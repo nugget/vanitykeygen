@@ -81,7 +81,7 @@ func (h *Hub) Broadcast(eventType string, data any) {
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		s.writeError(w, http.StatusInternalServerError, "streaming not supported")
+		s.writeError(w, r, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 

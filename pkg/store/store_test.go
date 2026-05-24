@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -160,6 +163,70 @@ func TestClientUpsertAndList(t *testing.T) {
 	}
 	if clients[0].KeyRate != 1234.5 {
 		t.Errorf("expected key rate 1234.5, got %f", clients[0].KeyRate)
+	}
+}
+
+func TestFileStoreUsesSingleConnection(t *testing.T) {
+	s, err := New(filepath.Join(t.TempDir(), "vkg.db"))
+	if err != nil {
+		t.Fatalf("New(file): %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	if got := s.db.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("expected file-backed store to use 1 open connection, got %d", got)
+	}
+}
+
+func TestConcurrentClientWritesDoNotReturnBusy(t *testing.T) {
+	s, err := New(filepath.Join(t.TempDir(), "vkg.db"))
+	if err != nil {
+		t.Fatalf("New(file): %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 32)
+	var wg sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for i := 0; i < 40; i++ {
+				client := &vkg.ClientInfo{
+					ID:       fmt.Sprintf("client-%02d", worker),
+					Hostname: fmt.Sprintf("host-%02d", worker),
+					Version:  "test",
+					Seekers:  4,
+					KeyRate:  float64(i),
+					KeyCount: int64(i),
+					LastSeen: time.Now().UTC(),
+					Status:   "active",
+				}
+				if err := s.UpsertClient(ctx, client); err != nil {
+					errCh <- fmt.Errorf("upsert client %d: %w", worker, err)
+					return
+				}
+				if i%10 == 0 {
+					if err := s.MarkOfflineClients(ctx, 90*time.Second); err != nil {
+						errCh <- fmt.Errorf("mark offline: %w", err)
+						return
+					}
+					if err := s.DeleteOfflineClients(ctx, 5*time.Minute); err != nil {
+						errCh <- fmt.Errorf("delete offline: %w", err)
+						return
+					}
+				}
+			}
+		}(worker)
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Error(err)
 	}
 }
 
