@@ -64,18 +64,18 @@ type Store struct {
 
 // New opens (or creates) a SQLite database and runs migrations.
 //
-// In-memory paths (":memory:" or "file::memory:...") are pinned to a
-// single connection because each new database/sql connection to an
-// in-memory database opens its own empty database, which would lose
-// the schema and any data written through other connections.
+// SQLite is pinned to a single database/sql connection so writes are
+// serialized inside the process and connection-local pragmas such as
+// busy_timeout apply to every store operation. This is also required
+// for in-memory databases, where each connection would otherwise see
+// a separate empty database.
 func New(dbPath string) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-	if isInMemoryDSN(dbPath) {
-		db.SetMaxOpenConns(1)
-	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	// SQLite performance pragmas
 	for _, pragma := range []string{
 		"PRAGMA journal_mode=WAL",
@@ -92,10 +92,6 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return &Store{db: db}, nil
-}
-
-func isInMemoryDSN(dsn string) bool {
-	return dsn == ":memory:" || strings.Contains(dsn, ":memory:")
 }
 
 // Close closes the underlying database handle.

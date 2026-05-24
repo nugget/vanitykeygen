@@ -36,6 +36,8 @@ var (
 	numSeekers int
 )
 
+const maxErrorResponseBytes = 4096
+
 // FlagSet returns the flag set understood by the client subcommand.
 // Callers register the flags via Run; this is exposed so the top-level
 // `vkg` binary can render `--help` output for both subcommands.
@@ -256,7 +258,7 @@ func (c *Client) fetchTargets() error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("fetch targets: server returned %s", resp.Status)
+		return responseStatusError("fetch targets", resp)
 	}
 
 	var result struct {
@@ -297,7 +299,7 @@ func (c *Client) register() error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("register: server returned %s", resp.Status)
+		return responseStatusError("register", resp)
 	}
 
 	var result struct {
@@ -342,10 +344,10 @@ func (c *Client) sendHeartbeat() error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("heartbeat: server returned %s", resp.Status)
+		return responseStatusError("heartbeat", resp)
 	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
 }
 
@@ -377,12 +379,31 @@ func (c *Client) reportMatch(s seekerStatus) error {
 		return fmt.Errorf("post match: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("report match: server returned %s", resp.Status)
+		return responseStatusError("report match", resp)
 	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
+}
+
+func responseStatusError(operation string, resp *http.Response) error {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("%s: server returned %s: read response body: %w", operation, resp.Status, err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	truncated := ""
+	if len(body) > maxErrorResponseBytes {
+		body = body[:maxErrorResponseBytes]
+		truncated = " (truncated)"
+	}
+	detail := strings.TrimSpace(string(body))
+	if detail == "" {
+		return fmt.Errorf("%s: server returned %s", operation, resp.Status)
+	}
+	return fmt.Errorf("%s: server returned %s: %s%s", operation, resp.Status, detail, truncated)
 }
 
 // Run starts the client. It blocks until interrupted or a fatal error occurs.

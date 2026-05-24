@@ -10,7 +10,7 @@ import (
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req vkg.RegisterRequest
 	if err := s.readJSON(r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid JSON")
+		s.writeError(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
@@ -18,7 +18,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if clientID == "" {
 		id, err := vkg.NewID()
 		if err != nil {
-			s.writeError(w, http.StatusInternalServerError, "failed to generate client ID")
+			s.writeError(w, r, http.StatusInternalServerError, "failed to generate client ID")
 			return
 		}
 		clientID = id
@@ -34,7 +34,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.UpsertClient(r.Context(), c); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -46,11 +46,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	var hb vkg.Heartbeat
 	if err := s.readJSON(r, &hb); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid JSON")
+		s.writeError(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if hb.ClientID == "" {
-		s.writeError(w, http.StatusBadRequest, "client_id is required")
+		s.writeError(w, r, http.StatusBadRequest, "client_id is required")
 		return
 	}
 
@@ -66,7 +66,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.UpsertClient(r.Context(), c); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -77,7 +77,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListClients(w http.ResponseWriter, r *http.Request) {
 	clients, err := s.store.ListClients(r.Context())
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if clients == nil {
@@ -93,12 +93,12 @@ func (s *Server) handleListClients(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	clients, err := s.store.ListClients(r.Context())
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	matchCount, err := s.store.MatchCount(r.Context(), "")
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 

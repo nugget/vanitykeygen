@@ -124,8 +124,16 @@ func (s *Server) readJSON(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
-// writeError writes a JSON error response.
-func (s *Server) writeError(w http.ResponseWriter, status int, msg string) {
+// writeError writes a JSON error response and logs server-side failures.
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	if status >= http.StatusInternalServerError {
+		s.logger.Error("HTTP request failed",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", status,
+			"error", msg,
+		)
+	}
 	s.writeJSON(w, status, map[string]string{"error": msg})
 }
 

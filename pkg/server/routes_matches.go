@@ -14,7 +14,7 @@ func (s *Server) handleListMatches(w http.ResponseWriter, r *http.Request) {
 
 	matches, err := s.store.ListMatches(r.Context(), targetID, limit)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if matches == nil {
@@ -27,11 +27,11 @@ func (s *Server) handleGetMatch(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	m, err := s.store.GetMatch(r.Context(), id)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if m == nil {
-		s.writeError(w, http.StatusNotFound, "match not found")
+		s.writeError(w, r, http.StatusNotFound, "match not found")
 		return
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{"data": m})
@@ -40,7 +40,7 @@ func (s *Server) handleGetMatch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePostMatch(w http.ResponseWriter, r *http.Request) {
 	var m vkg.Match
 	if err := s.readJSON(r, &m); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid JSON")
+		s.writeError(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
@@ -64,7 +64,7 @@ func (s *Server) handlePostMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.RecordMatch(r.Context(), &m); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 
